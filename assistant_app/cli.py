@@ -2,6 +2,7 @@ import argparse
 import csv
 import logging
 from pathlib import Path
+from typing import Any, Dict, Optional
 
 from .core import (
     AIContextBuilder,
@@ -16,14 +17,18 @@ from .core import (
 )
 
 
-def build_agent(api_key: str | None = None) -> PowerBIAssistantAgent:
+def build_agent(
+    api_key: Optional[str] = None,
+    metadata_override: Optional[Dict[str, Any]] = None,
+    registry_path: Optional[str] = None,
+) -> PowerBIAssistantAgent:
     client = configure_openai_client(api_key=api_key)
-    loader = SparkDataLoader()
-    metadata = SemanticModelMetadata(loader)
+    loader = None if metadata_override else SparkDataLoader()
+    metadata = SemanticModelMetadata(loader=loader, metadata_override=metadata_override)
     context_builder = AIContextBuilder(metadata)
     generator = DAXGenerationEngine(client=client, context_builder=context_builder)
     validator = ValidationEngine(metadata)
-    registry = MeasureRegistry(metadata)
+    registry = MeasureRegistry(metadata, storage_path=Path(registry_path) if registry_path else None)
     explainer = ExplanationModule(generator)
     return PowerBIAssistantAgent(
         metadata=metadata,
@@ -35,7 +40,7 @@ def build_agent(api_key: str | None = None) -> PowerBIAssistantAgent:
 
 
 def run_demo(agent: PowerBIAssistantAgent) -> None:
-    print("\nDEMO MODE: End-to-end semantic model assistant\n")
+    print("\nDEMO MODE: Creating semantic model items\n")
     demo_requests = [
         {"item_type": "measure", "description": "Create total sales measure"},
         {
@@ -53,35 +58,34 @@ def run_demo(agent: PowerBIAssistantAgent) -> None:
         },
     ]
 
+    created_count = 0
     for i, req in enumerate(demo_requests, start=1):
-        print(f"[{i}] Request: {req['description']}")
         result = agent.generate_item(
             description=req["description"],
             item_type=req["item_type"],
             conditions=req.get("conditions", ""),
             auto_register=True,
         )
-        print(f"Name: {result['name']}")
-        print("Expression:")
-        print(result["expression"])
+        status = "✓" if not result["is_duplicate"] else "✓ (already exists)"
+        print(f"[{i}] {result['name']} ({result['item_type']}) {status}")
+        if not result["is_duplicate"]:
+            created_count += 1
         if result["validation_errors"]:
-            print("Validation issues:")
-            for issue in result["validation_errors"]:
-                print(f"- {issue}")
-        print("Explanation:")
-        print(result["explanation"])
-        print("-" * 60)
+            print(f"    ⚠ Warning: {', '.join(result['validation_errors'])}")
 
-    print("\nRegistry snapshot:")
-    print(agent.registry_summary())
+    print(f"\n✓ Successfully stored {created_count} items in registry")
+    print(f"\nTo view expressions, run:")
+    print(f"  python run_app.py --show-expression <item-name>")
+    print(f"\nTo view all created items, run:")
+    print(f"  python run_app.py --created")
 
 
 def show_flags(agent: PowerBIAssistantAgent) -> None:
-    """Display all created flags in detail."""
+    """Display all created flags (without expressions by default)."""
     flags = agent.registry.get_items_by_type('flag')
     
     print("\n" + "=" * 70)
-    print("FLAGS REGISTRY")
+    print(f"FLAGS ({len(flags)})")
     print("=" * 70 + "\n")
     
     if not flags:
@@ -91,38 +95,37 @@ def show_flags(agent: PowerBIAssistantAgent) -> None:
         print("  Then select 'flag' as the item type\n")
         return
     
-    print(f"✓ Total flags: {len(flags)}\n")
-    
     existing = [f for f in flags if f['source'] == 'existing']
     generated = [f for f in flags if f['source'] == 'generated']
     
     if existing:
-        print(f"EXISTING FLAGS ({len(existing)})")
+        print(f"EXISTING ({len(existing)})")
         print("-" * 70)
         for i, flag in enumerate(existing, 1):
-            print(f"\n[{i}] {flag['name']}")
-            print(f"    Expression: {flag['expression']}")
-            if flag['description']:
-                print(f"    Description: {flag['description']}")
-        print()
+            print(f"[{i}] {flag['name']}")
+            if flag.get('description'):
+                print(f"    {flag['description']}")
     
     if generated:
-        print(f"GENERATED FLAGS ({len(generated)})")
+        if existing:
+            print()
+        print(f"GENERATED ({len(generated)})")
         print("-" * 70)
         for i, flag in enumerate(generated, 1):
-            print(f"\n[{i}] {flag['name']}")
-            print(f"    Expression: {flag['expression']}")
-            if flag['description']:
-                print(f"    Description: {flag['description']}")
-            if flag['created_at']:
+            print(f"[{i}] {flag['name']}")
+            if flag.get('description'):
+                print(f"    {flag['description']}")
+            if flag.get('created_at'):
                 print(f"    Created: {flag['created_at']}")
-        print()
     
+    print("\n" + "-" * 70)
+    print("\nTo view the expression for a flag, run:")
+    print("  python run_app.py --show-expression <flag-name>")
     print("=" * 70 + "\n")
 
 
 def show_registry(agent: PowerBIAssistantAgent, item_type: str | None = None) -> None:
-    """Display registry filtered by item type."""
+    """Display registry filtered by item type (without expressions)."""
     print("\n" + "=" * 70)
     
     if item_type:
@@ -169,7 +172,7 @@ def show_registry(agent: PowerBIAssistantAgent, item_type: str | None = None) ->
 
 
 def show_created(agent: PowerBIAssistantAgent) -> None:
-    """Display only generated items with full expressions."""
+    """Display only generated items (without expressions by default)."""
     created_items = [i for i in agent.registry.items.values() if i.get("source") == "generated"]
 
     print("\n" + "=" * 70)
@@ -184,15 +187,18 @@ def show_created(agent: PowerBIAssistantAgent) -> None:
         return
 
     for idx, item in enumerate(created_items, start=1):
-        print(f"[{idx}] {item['name']}")
-        print(f"    Type: {item['item_type']}")
-        print(f"    Expression: {item['expression']}")
+        print(f"[{idx}] {item['name']} ({item['item_type']})")
         if item.get("description"):
             print(f"    Description: {item['description']}")
         if item.get("created_at"):
             print(f"    Created: {item['created_at']}")
-        print()
 
+    print("\n" + "-" * 70)
+    print("\nTo view the expression for an item, run:")
+    print("  python run_app.py --show-expression <item-name>")
+    print("\nExamples:")
+    if created_items:
+        print(f"  python run_app.py --show-expression {created_items[0]['name']}")
     print("=" * 70 + "\n")
 
 
@@ -242,6 +248,77 @@ def export_created_csv(agent: PowerBIAssistantAgent, output_path: str) -> None:
     print(f"\nExported {len(created_items)} generated items to: {path}\n")
 
 
+def test_created_fields(agent: PowerBIAssistantAgent) -> None:
+    """Validate generated fields against current model metadata."""
+    created_items = [i for i in agent.registry.items.values() if i.get("source") == "generated"]
+
+    print("\n" + "=" * 70)
+    print(f"CREATED FIELD TESTS ({len(created_items)})")
+    print("=" * 70 + "\n")
+
+    if not created_items:
+        print("No generated items found to test.")
+        print("Run --demo or --interactive first.\n")
+        return
+
+    passed = 0
+    failed = 0
+    for idx, item in enumerate(created_items, start=1):
+        valid, issues = agent.validator.validate_expression(item.get("expression", ""))
+        status = "PASS" if valid else "FAIL"
+        print(f"[{idx}] {item.get('name', '')} [{item.get('item_type', '')}] -> {status}")
+        if valid:
+            passed += 1
+        else:
+            failed += 1
+            for issue in issues:
+                print(f"    - {issue}")
+
+    print("\n" + "-" * 70)
+    print(f"Summary: passed={passed}, failed={failed}, total={len(created_items)}")
+    print("=" * 70 + "\n")
+
+
+def show_expression(agent: PowerBIAssistantAgent, item_name: str) -> None:
+    """Display the DAX/Spark expression for a specific item."""
+    item = agent.registry.items.get(item_name)
+    
+    if not item:
+        # Try case-insensitive search
+        for key, val in agent.registry.items.items():
+            if key.lower() == item_name.lower():
+                item = val
+                break
+    
+    if not item:
+        print(f"\n✗ Item '{item_name}' not found in registry.")
+        print(f"\nAvailable items:")
+        all_items = list(agent.registry.items.keys())
+        if all_items:
+            for i, name in enumerate(all_items, 1):
+                print(f"  {name}")
+        else:
+            print("  (no items created yet)")
+        print()
+        return
+    
+    print("\n" + "=" * 70)
+    print(f"EXPRESSION: {item['name']}")
+    print("=" * 70 + "\n")
+    
+    print(f"Type: {item['item_type']}")
+    print(f"Source: {item['source']}")
+    if item.get('description'):
+        print(f"Description: {item['description']}")
+    if item.get('created_at'):
+        print(f"Created: {item['created_at']}")
+    
+    print(f"\nExpression (DAX/Spark Query):")
+    print("-" * 70)
+    print(item.get('expression', '(no expression)'))
+    print("-" * 70 + "\n")
+
+
 
 def main() -> None:
     parser = argparse.ArgumentParser(
@@ -281,7 +358,13 @@ def main() -> None:
     parser.add_argument(
         "--created",
         action="store_true",
-        help="View only generated items with output expressions",
+        help="View only generated items (without expressions)",
+    )
+    parser.add_argument(
+        "--show-expression",
+        type=str,
+        metavar="NAME",
+        help="Show the expression/query for a specific item (example: --show-expression Total_Sales)",
     )
     parser.add_argument(
         "--schema",
@@ -298,6 +381,11 @@ def main() -> None:
         type=str,
         metavar="PATH",
         help="Export generated items to CSV (example: --export-created-csv created_items.csv)",
+    )
+    parser.add_argument(
+        "--test-created",
+        action="store_true",
+        help="Run backend validation tests on generated fields",
     )
     parser.add_argument(
         "--log-level",
@@ -333,20 +421,29 @@ def main() -> None:
         show_schema(agent, as_json=True)
     elif args.export_created_csv:
         export_created_csv(agent, output_path=args.export_created_csv)
+    elif args.test_created:
+        test_created_fields(agent)
+    elif args.show_expression:
+        show_expression(agent, item_name=args.show_expression)
     else:
         print("\nAI-powered Power BI Semantic Model Assistant")
         print("=" * 60)
-        print("\nUsage:")
+        print("\nCore Commands:")
         print("  python run_app.py --demo              # Run demo scenario")
         print("  python run_app.py --interactive       # Interactive mode")
+        print("\nView Commands:")
+        print("  python run_app.py --created           # View all created items")
+        print("  python run_app.py --registry          # View all items in registry")
         print("  python run_app.py --flags             # View all flags")
-        print("  python run_app.py --registry          # View all items")
-        print("  python run_app.py --created           # View generated items + output")
+        print("  python run_app.py --list-by-type TYPE # View items by type")
         print("  python run_app.py --schema            # Print schema summary")
         print("  python run_app.py --schema-json       # Print full schema JSON")
-        print("  python run_app.py --export-created-csv created_items.csv")
-        print("  python run_app.py --list-by-type flag # View only flags")
+        print("\nExpression Commands:")
+        print("  python run_app.py --show-expression NAME  # Show expression for item")
+        print("\nExport & Test Commands:")
+        print("  python run_app.py --export-created-csv FILE  # Export to CSV")
+        print("  python run_app.py --test-created      # Validate created fields")
         print("\nOptions:")
-        print("  --api-key KEY                         # Provide API key")
+        print("  --api-key KEY                         # Provide OpenAI API key")
         print("  --log-level {DEBUG,INFO,WARNING}      # Set logging level")
 

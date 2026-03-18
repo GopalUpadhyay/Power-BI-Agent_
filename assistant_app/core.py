@@ -156,7 +156,7 @@ class SparkDataLoader:
 class SemanticModelMetadata:
     """Semantic model metadata holder and schema helper."""
 
-    def __init__(self, loader: SparkDataLoader):
+    def __init__(self, loader: Optional[SparkDataLoader] = None, metadata_override: Optional[Dict[str, Any]] = None):
         self.loader = loader
         self.metadata: Dict[str, Any] = {
             "tables": {},
@@ -165,9 +165,53 @@ class SemanticModelMetadata:
             "calculated_columns": {},
             "calculated_tables": {},
         }
-        self._build_metadata()
+        if metadata_override:
+            self.metadata = self._normalize_metadata(metadata_override)
+        else:
+            self._build_metadata()
+
+    def _normalize_metadata(self, raw: Dict[str, Any]) -> Dict[str, Any]:
+        normalized: Dict[str, Any] = {
+            "tables": {},
+            "relationships": raw.get("relationships", []) if isinstance(raw.get("relationships", []), list) else [],
+            "measures": raw.get("measures", {}) if isinstance(raw.get("measures", {}), dict) else {},
+            "calculated_columns": raw.get("calculated_columns", {}) if isinstance(raw.get("calculated_columns", {}), dict) else {},
+            "calculated_tables": raw.get("calculated_tables", {}) if isinstance(raw.get("calculated_tables", {}), dict) else {},
+        }
+
+        raw_tables = raw.get("tables", {}) if isinstance(raw.get("tables", {}), dict) else {}
+        for table_name, table_info in raw_tables.items():
+            if not isinstance(table_info, dict):
+                continue
+            columns = table_info.get("columns", {})
+            if isinstance(columns, list):
+                columns = {str(col): "string" for col in columns}
+            if not isinstance(columns, dict):
+                columns = {}
+
+            normalized["tables"][str(table_name)] = {
+                "columns": {str(col): str(col_type) for col, col_type in columns.items()},
+                "column_count": len(columns),
+            }
+
+        # Ensure minimal defaults if uploaded metadata is sparse.
+        if not normalized["tables"]:
+            normalized["tables"] = {
+                "Sales": {
+                    "columns": {
+                        "Sales": "decimal(18,2)",
+                        "OrderDate": "date",
+                        "ProductKey": "bigint",
+                    },
+                    "column_count": 3,
+                }
+            }
+
+        return normalized
 
     def _build_metadata(self) -> None:
+        if not self.loader:
+            return
         for table_name in self.loader.get_available_tables():
             schema = self.loader.get_table_schema(table_name)
             self.metadata["tables"][table_name] = {
@@ -492,10 +536,10 @@ class ValidationEngine:
 class MeasureRegistry:
     """Tracks created items and prevents duplicate logic."""
 
-    def __init__(self, metadata: SemanticModelMetadata):
+    def __init__(self, metadata: SemanticModelMetadata, storage_path: Optional[Path] = None):
         self.metadata = metadata
         self.items: Dict[str, Dict[str, Any]] = {}
-        self.storage_path = Path(__file__).resolve().parents[1] / ".assistant_registry.json"
+        self.storage_path = storage_path or (Path(__file__).resolve().parents[1] / ".assistant_registry.json")
         self._load_existing()
         self._load_persisted()
 
@@ -823,33 +867,41 @@ class PowerBIAssistantAgent:
         )
 
         print("\nGenerated Result")
-        print("-" * 30)
-        print(f"Name: {result['name']}")
-        print(f"Type: {result['item_type']}")
-        print("Expression:")
-        print(result["expression"])
-        print("Explanation:")
-        print(result["explanation"])
-
-        if result["similar_candidates"]:
-            print("Similar existing items:")
-            for name, score in result["similar_candidates"][:3]:
-                print(f"- {name} ({score:.0%} match)")
+        print("-" * 50)
+        print(f"✓ Name: {result['name']}")
+        print(f"  Type: {result['item_type']}")
 
         if result["validation_errors"]:
-            print("Validation issues:")
+            print("\n⚠ Validation issues:")
             for err in result["validation_errors"]:
-                print(f"- {err}")
+                print(f"  - {err}")
+        else:
+            print("\n✓ Validation passed")
 
-        print("Suggestions:")
+        if result["similar_candidates"]:
+            print("\nSimilar existing items:")
+            for name, score in result["similar_candidates"][:3]:
+                print(f"  - {name} ({score:.0%} match)")
+
+        print("\nSuggestions:")
         for tip in result["tips"]:
-            print(f"- {tip}")
+            print(f"  - {tip}")
+
+        # Show expression in hidden section
+        show_expr = input("\nView expression? (y/n): ").strip().lower()
+        if show_expr == "y":
+            print("\nExpression (DAX/Spark Query):")
+            print("-" * 50)
+            print(result["expression"])
+            print("Explanation:")
+            print(result["explanation"])
+            print("-" * 50)
 
         if result["is_duplicate"]:
-            print("Item name already exists in registry. Not saved.")
+            print("\nItem name already exists in registry. Not saved.")
             return
 
-        save = input("Save to registry? (y/n): ").strip().lower()
+        save = input("\nSave to registry? (y/n): ").strip().lower()
         if save == "y":
             saved = self.registry.register(
                 name=result["name"],
@@ -857,7 +909,7 @@ class PowerBIAssistantAgent:
                 expression=result["expression"],
                 description=result["description"],
             )
-            print("Saved." if saved else "Could not save (duplicate).")
+            print("✓ Saved." if saved else "✗ Could not save (duplicate).")
         else:
             print("Not saved.")
 
@@ -866,8 +918,11 @@ class PowerBIAssistantAgent:
         return (
             "Commands:\n"
             "- create [measure|flag|column|table] [description]\n"
-            "- schema\n"
-            "- registry\n"
-            "- help\n"
-            "- exit"
+            "- schema          Show semantic model\n"
+            "- registry        View items in registry\n"
+            "- help            Show this help\n"
+            "- exit            Exit\n"
+            "\n"
+            "Tip: Use 'exit' then run:\n"
+            "  python run_app.py --show-expression <name>   View expression"
         )

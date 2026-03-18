@@ -1,6 +1,23 @@
 AI BOT MAQ - COMMANDS REFERENCE
 ================================
 
+IMPORTANT: Expressions (DAX/Spark queries) are now STORED INTERNALLY and not 
+displayed by default. Use --show-expression to view them as needed.
+
+
+ONE-COMMAND LAUNCHER (RECOMMENDED)
+----------------------------------
+# Start full UI (default mode)
+python start.py
+
+# Start UI on custom port
+python start.py ui --port 8502
+
+# Run CLI through one launcher file
+python start.py cli -- --demo
+python start.py cli -- --created
+
+
 1) PROJECT SETUP
 ----------------
 cd /home/gopal-upadhyay/AI_Bot_MAQ
@@ -17,10 +34,10 @@ source .venv/bin/activate
 # Run interactive mode
 ./.venv/bin/python run_app.py --interactive
 
-# View all generated + existing items
+# View all generated + existing items (without expressions)
 ./.venv/bin/python run_app.py --registry
 
-# View only generated items (with output expressions)
+# View only generated items (without expressions by default)
 ./.venv/bin/python run_app.py --created
 
 # View only flags
@@ -33,7 +50,16 @@ source .venv/bin/activate
 ./.venv/bin/python run_app.py --list-by-type measure
 
 
-3) SCHEMA COMMANDS
+3) VIEW EXPRESSIONS
+-------------------
+# View expression for a specific item
+./.venv/bin/python run_app.py --show-expression Create_total_sales_measure
+
+# View expression for a flag
+./.venv/bin/python run_app.py --show-expression Create_AI_pipeline_flag
+
+
+4) SCHEMA COMMANDS
 ------------------
 # Print schema summary
 ./.venv/bin/python run_app.py --schema
@@ -45,13 +71,19 @@ source .venv/bin/activate
 ./.venv/bin/python run_app.py --schema-json > semantic_model_schema.json
 
 
-4) EXPORT COMMANDS
+5) EXPORT COMMANDS
 ------------------
-# Export generated items to CSV
+# Export generated items to CSV (includes expressions)
 ./.venv/bin/python run_app.py --export-created-csv created_items.csv
 
 
-5) RUN WEB UI (STREAMLIT)
+6) FIELD VALIDATION
+-------------------
+# Test all generated fields against the model schema
+./.venv/bin/python run_app.py --test-created
+
+
+7) RUN WEB UI (STREAMLIT)
 -------------------------
 # Start UI
 ./.venv/bin/python -m streamlit run run_ui.py --server.port 8501
@@ -63,7 +95,7 @@ source .venv/bin/activate
 ./.venv/bin/python -m streamlit run run_ui.py --server.headless true --server.port 8501
 
 
-6) OPTIONAL ENVIRONMENT COMMANDS
+8) OPTIONAL ENVIRONMENT COMMANDS
 --------------------------------
 # Check Python version
 python --version
@@ -75,15 +107,15 @@ source .venv/bin/activate
 deactivate
 
 
-7) API KEY (.env)
+9) API KEY (.env)
 -----------------
 # File: /home/gopal-upadhyay/AI_Bot_MAQ/.env
 # Add your key like this:
 OPENAI_API_KEY=your-openai-api-key-here
 
 
-8) TROUBLESHOOTING
-------------------
+10) TROUBLESHOOTING
+-------------------
 # If command fails with system Python, always use:
 ./.venv/bin/python <command>
 
@@ -95,9 +127,15 @@ OPENAI_API_KEY=your-openai-api-key-here
 ./.venv/bin/python -m py_compile assistant_app/core.py assistant_app/cli.py run_app.py run_ui.py
 
 
-9) MOST IMPORTANT DAILY COMMANDS
---------------------------------
+11) MOST IMPORTANT DAILY COMMANDS
+----------------------------------
+# View created items and their descriptions
 ./.venv/bin/python run_app.py --created
+
+# View expression for a specific item
+./.venv/bin/python run_app.py --show-expression <item-name>
+
+# Check model schema
 ./.venv/bin/python run_app.py --schema
 ./.venv/bin/python run_app.py --export-created-csv created_items.csv
 ./.venv/bin/python -m streamlit run run_ui.py --server.port 8501

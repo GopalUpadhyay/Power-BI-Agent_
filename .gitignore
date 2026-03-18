@@ -43,3 +43,7 @@ wheels/
 .pytest_cache/
 .coverage
 htmlcov/
+
+# Local app runtime storage
+.assistant_registry*.json
+.assistant_models/
