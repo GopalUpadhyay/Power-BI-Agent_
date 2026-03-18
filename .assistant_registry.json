@@ -1,0 +1,38 @@
+{
+  "version": 1,
+  "updated_at": "2026-03-18T22:29:08.362911",
+  "generated_items": [
+    {
+      "name": "Create_total_sales_measure",
+      "item_type": "measure",
+      "expression": "SUM(Sales[Sales])",
+      "description": "Create total sales measure",
+      "source": "generated",
+      "created_at": "2026-03-18T22:29:08.353071"
+    },
+    {
+      "name": "Create_AI_pipeline_flag",
+      "item_type": "flag",
+      "expression": "IF(SUM(Sales[Sales]) > 1000, \"Yes\", \"No\")",
+      "description": "Create AI pipeline flag",
+      "source": "generated",
+      "created_at": "2026-03-18T22:29:08.353735"
+    },
+    {
+      "name": "Create_month_over_month_sales_growth",
+      "item_type": "measure",
+      "expression": "VAR CurrentMonthSales = SUM(Sales[Sales])\nVAR PrevMonthSales = CALCULATE(SUM(Sales[Sales]), DATEADD(Sales[OrderDate], -1, MONTH))\nRETURN DIVIDE(CurrentMonthSales - PrevMonthSales, PrevMonthSales)",
+      "description": "Create month over month sales growth",
+      "source": "generated",
+      "created_at": "2026-03-18T22:29:08.354264"
+    },
+    {
+      "name": "Create_top_5_products_table_by_total_sales",
+      "item_type": "table",
+      "expression": "TOPN(5, SUMMARIZE(Sales, Product[ProductName], \"Total_Sales\", SUM(Sales[Sales])), [Total_Sales], DESC)",
+      "description": "Create top 5 products table by total sales",
+      "source": "generated",
+      "created_at": "2026-03-18T22:29:08.362894"
+    }
+  ]
+}

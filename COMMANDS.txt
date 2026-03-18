@@ -1,0 +1,103 @@
+AI BOT MAQ - COMMANDS REFERENCE
+================================
+
+1) PROJECT SETUP
+----------------
+cd /home/gopal-upadhyay/AI_Bot_MAQ
+python -m venv .venv
+source .venv/bin/activate
+./.venv/bin/python -m pip install -r requirements.txt
+
+
+2) RUN CORE APP (CLI)
+---------------------
+# Run demo scenario (creates measure/flag/table examples)
+./.venv/bin/python run_app.py --demo
+
+# Run interactive mode
+./.venv/bin/python run_app.py --interactive
+
+# View all generated + existing items
+./.venv/bin/python run_app.py --registry
+
+# View only generated items (with output expressions)
+./.venv/bin/python run_app.py --created
+
+# View only flags
+./.venv/bin/python run_app.py --flags
+
+# View only tables
+./.venv/bin/python run_app.py --list-by-type table
+
+# View only measures
+./.venv/bin/python run_app.py --list-by-type measure
+
+
+3) SCHEMA COMMANDS
+------------------
+# Print schema summary
+./.venv/bin/python run_app.py --schema
+
+# Print full schema JSON in terminal
+./.venv/bin/python run_app.py --schema-json
+
+# Save full schema JSON to file
+./.venv/bin/python run_app.py --schema-json > semantic_model_schema.json
+
+
+4) EXPORT COMMANDS
+------------------
+# Export generated items to CSV
+./.venv/bin/python run_app.py --export-created-csv created_items.csv
+
+
+5) RUN WEB UI (STREAMLIT)
+-------------------------
+# Start UI
+./.venv/bin/python -m streamlit run run_ui.py --server.port 8501
+
+# Open in browser
+# http://localhost:8501
+
+# Headless mode (server environments)
+./.venv/bin/python -m streamlit run run_ui.py --server.headless true --server.port 8501
+
+
+6) OPTIONAL ENVIRONMENT COMMANDS
+--------------------------------
+# Check Python version
+python --version
+
+# Activate virtual environment
+source .venv/bin/activate
+
+# Deactivate virtual environment
+deactivate
+
+
+7) API KEY (.env)
+-----------------
+# File: /home/gopal-upadhyay/AI_Bot_MAQ/.env
+# Add your key like this:
+OPENAI_API_KEY=your-openai-api-key-here
+
+
+8) TROUBLESHOOTING
+------------------
+# If command fails with system Python, always use:
+./.venv/bin/python <command>
+
+# Reinstall dependencies if needed:
+./.venv/bin/python -m pip install --upgrade pip
+./.venv/bin/python -m pip install -r requirements.txt
+
+# Quick compile check:
+./.venv/bin/python -m py_compile assistant_app/core.py assistant_app/cli.py run_app.py run_ui.py
+
+
+9) MOST IMPORTANT DAILY COMMANDS
+--------------------------------
+./.venv/bin/python run_app.py --created
+./.venv/bin/python run_app.py --schema
+./.venv/bin/python run_app.py --export-created-csv created_items.csv
+./.venv/bin/python -m streamlit run run_ui.py --server.port 8501
