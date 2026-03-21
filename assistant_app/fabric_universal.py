@@ -860,6 +860,23 @@ class ValidationEngine:
                     continue
                 if c not in table.get("columns", {}):
                     issues.append(f"Column not found: {t}[{c}]")
+            
+            # Check for semantic errors
+            code_upper = code.upper()
+            
+            # Check if summing ID/Key columns (common mistake)
+            # More precise regex: match only SUM(Table[IDColumn]) pattern specifically
+            id_key_pattern = r"SUM\s*\(\s*(\w+)\s*\[\s*(\w*(?:Key|ID|EmployeeKey|ProductKey|OrderID|CustomerID)\w*)\s*\]\s*\)"
+            id_matches = re.findall(id_key_pattern, code, re.IGNORECASE)
+            if id_matches:
+                # Format matches as "Table[Column]"
+                formatted_matches = [f"{table}[{col}]" for table, col in id_matches]
+                issues.append(f"⚠️ WARNING: You're using SUM() on ID/Key columns: {', '.join(formatted_matches)}. Use DISTINCTCOUNT() instead to count unique IDs, or SUM() on actual numeric values (SalesAmount, Price, Cost, etc).")
+            
+            # Check if average order value pattern is missing DISTINCTCOUNT
+            if any(x in code.lower() for x in ["average order", "avgorder"]):
+                if "DISTINCTCOUNT" not in code_upper and "AVERAGE" not in code_upper:
+                    issues.append("⚠️ Average Order Value should use: DIVIDE(SUM(amount), DISTINCTCOUNT(OrderID))")
 
         if generated_type.upper() == "SQL":
             if "select" not in code.lower():

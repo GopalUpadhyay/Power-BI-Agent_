@@ -1,6 +1,7 @@
 import csv
 import json
 import logging
+from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
@@ -8,6 +9,7 @@ import pandas as pd
 import streamlit as st
 
 from .cli import build_agent
+from .formula_corrector import FormulaCorrector
 from .fabric_universal import (
     ContextBuilder,
     DataIngestionLayer,
@@ -527,7 +529,6 @@ def run_ui() -> None:
                 with st.spinner("Extracting metadata from PBIX file..."):
                     try:
                         # Save uploaded file temporarily
-                        from pathlib import Path
                         pbix_path = Path(f"/tmp/{pbix_file.name}")
                         pbix_path.write_bytes(pbix_file.getvalue())
                         
@@ -752,6 +753,7 @@ def run_ui() -> None:
                 ["Semantic Model", "Warehouse", "Notebook", "Python Script"],
                 index=0,
             )
+            item_name = st.text_input("Item Name", placeholder="e.g. Sales Growth, Monthly Revenue")
             description = st.text_input("Description", placeholder="Create month over month sales growth")
             conditions = st.text_input("Conditions (optional)", placeholder="where Sales > 1000")
             auto_register = st.checkbox("Auto-register item", value=True)
@@ -837,29 +839,155 @@ def run_ui() -> None:
                                 from_col_clean = from_col.replace('\ufeff', '').strip()
                                 to_col_clean = to_col.replace('\ufeff', '').strip()
                                 schema_context += f"  • {from_table}[{from_col_clean}] joins {to_table}[{to_col_clean}]\n"
-                            
-                            schema_context += "\nJOIN PATTERNS:\n"
-                            schema_context += "  • Use LEFT JOINs to preserve all fact table records\n"
-                            schema_context += "  • Join through intermediate tables (e.g., through SalesPerson to reach SalesPersonRegion)\n"
-                            schema_context += "  • Always qualify column names: df['ColumnName'] == OtherTable['ColumnName']\n"
-                            schema_context += "  • Include clear comments for each join explaining its purpose\n"
+                        
+                        # Add column semantic descriptions
+                        schema_context += "\n=== COLUMN DEFINITIONS (what each column represents) ===\n"
+                        if tables:
+                            for table_name, info in tables.items():
+                                columns = info.get("columns", {})
+                                if columns:
+                                    schema_context += f"\n{table_name}:\n"
+                                    for col_name, col_info in columns.items():
+                                        col_clean = col_name.replace('\ufeff', '').strip()
+                                        # Infer column purpose from name
+                                        if any(x in col_clean.lower() for x in ["amount", "sales", "revenue", "price", "cost"]):
+                                            col_type = "NUMERIC (monetary value)"
+                                        elif any(x in col_clean.lower() for x in ["quantity", "count", "number", "total"]):
+                                            col_type = "NUMERIC (count/quantity)"
+                                        elif any(x in col_clean.lower() for x in ["date", "month", "year", "time"]):
+                                            col_type = "DATE/TIME"
+                                        elif any(x in col_clean.lower() for x in ["key", "id"]):
+                                            col_type = "ID/KEY (for joins)"
+                                        else:
+                                            col_type = "TEXT/ATTRIBUTE"
+                                        schema_context += f"    • {col_clean}: {col_type}\n"
+                        
+                        # Add common metric patterns
+                        schema_context += "\n=== COMMON DAX METRIC PATTERNS (examples for your columns) ===\n"
+                        schema_context += "Total/Sum: SUM(Sales[SalesAmount])\n"
+                        schema_context += "Average: AVERAGE(Sales[SalesAmount])\n"
+                        schema_context += "Count of Orders: DISTINCTCOUNT(Sales[OrderID])\n"
+                        schema_context += "Average Order Value: DIVIDE(SUM(Sales[SalesAmount]), DISTINCTCOUNT(Sales[OrderID]))\n"
+                        schema_context += "Sales by Product: CALCULATE([Total Sales], FILTER(Product, Product[ProductKey] = SELECTEDVALUE(Product[ProductKey])))\n"
+                        schema_context += "Profit Margin: DIVIDE(SUM(Sales[SalesAmount]) - SUM(Sales[ProductCost]), SUM(Sales[SalesAmount]))\n"
+                        
+                        schema_context += "\nJOIN PATTERNS:\n"
+                        schema_context += "  • Use LEFT JOINs to preserve all fact table records\n"
+                        schema_context += "  • Join through intermediate tables (e.g., through SalesPerson to reach SalesPersonRegion)\n"
+                        schema_context += "  • Always qualify column names: df['ColumnName'] == OtherTable['ColumnName']\n"
+                        schema_context += "  • Include clear comments for each join explaining its purpose\n"
                         
                         schema_context += "\n=== OUTPUT REQUIREMENTS ===\n"
-                        schema_context += "For PySpark denormalized table joins:\n"
-                        schema_context += "  1. Start with base table (Sales recommended)\n"
-                        schema_context += "  2. Join each related table using LEFT JOIN to preserve rows\n"
-                        schema_context += "  3. For multi-hop relationships, join through intermediate tables\n"
-                        schema_context += "  4. Include clear comments above each join explaining the relationship\n"
-                        schema_context += "  5. Create final temp view with meaningful name\n"
-                        schema_context += "  6. Use proper column escaping for special characters\n"
+                        if output_language == "DAX":
+                            schema_context += "For DAX measures:\n"
+                            schema_context += "  1. Use exact column names from schema (case-sensitive)\n"
+                            schema_context += "  2. Qualify all columns: Table[Column]\n"
+                            schema_context += "  3. Use appropriate aggregation: SUM for amounts, AVERAGE for rates, DISTINCTCOUNT for unique counts\n"
+                            schema_context += "  4. For metrics like 'average order value', use DIVIDE(SUM of amounts, DISTINCTCOUNT of orders)\n"
+                            schema_context += "  5. Never sum ID/Key columns - only sum numeric values (SalesAmount, ProductCost, etc)\n"
+                            schema_context += "  6. Use CALCULATE for filtering by dimension attributes\n"
+                        elif output_language == "SQL":
+                            schema_context += "For SQL:\n"
+                            schema_context += "  1. Use correct table names and column names\n"
+                            schema_context += "  2. Use GROUP BY with SUM/AVG/COUNT appropriately\n"
+                        elif output_language == "PySpark":
+                            schema_context += "For PySpark denormalized table joins:\n"
+                            schema_context += "  1. Start with base table (Sales recommended)\n"
+                            schema_context += "  2. Join each related table using LEFT JOIN to preserve rows\n"
+                            schema_context += "  3. For multi-hop relationships, join through intermediate tables\n"
+                            schema_context += "  4. Include clear comments above each join explaining the relationship\n"
+                            schema_context += "  5. Create final temp view with meaningful name\n"
+                            schema_context += "  6. Use proper column escaping for special characters\n"
                     
                     universal_prompt = f"Create {item_type}: {description.strip()}"
                     if conditions.strip():
                         universal_prompt += f" with conditions {conditions.strip()}"
                     universal_prompt += schema_context
+                    
+                    # Add explicit instructions for what NOT to do
+                    universal_prompt += "\n\n=== CRITICAL INSTRUCTIONS ===\n"
+                    universal_prompt += "• DO use metric patterns above as templates\n"
+                    universal_prompt += "• DO use the exact column names from the COLUMN DEFINITIONS section\n"
+                    universal_prompt += f"• DO keep the code language consistent: {output_language}\n"
+                    universal_prompt += "• DO NOT sum ID/Key columns (EmployeeKey, ProductKey, OrderID, etc)\n"
+                    universal_prompt += "• DO NOT use columns that are not listed in the schema\n"
+                    universal_prompt += "• RETURN ONLY the code, no explanation\n"
 
                     u_result = universal_assistant.run_once(universal_prompt, target=target)
                     st.success(f"✓ Generated {u_result.get('type', output_language)} for {usage_target}.")
+
+                    # QUALITY CHECK: Apply formula corrections for DAX measures
+                    corrected_code = u_result.get("code", "")
+                    corrections_applied = []
+                    
+                    if output_language == "DAX" and item_type in ["measure", "flag"]:
+                        try:
+                            corrector = FormulaCorrector(active_metadata)
+                            corrected_code, warnings = corrector.correct_dax_formula(
+                                corrected_code, 
+                                description.strip(),
+                                item_name.strip(),
+                                item_type=item_type
+                            )
+                            
+                            if warnings:
+                                corrections_applied = warnings
+                                if corrected_code != u_result.get("code", ""):
+                                    st.warning("⚠️ **Formula Auto-Corrected**")
+                                    st.info("The generated formula had issues. We've auto-corrected it below.")
+                                    
+                                    # Show both versions for user review
+                                    col1, col2 = st.columns(2)
+                                    with col1:
+                                        st.subheader("❌ Generated (Had Issues)")
+                                        st.code(u_result.get("code", ""), language="sql")
+                                        for warning in corrections_applied:
+                                            st.warning(warning)
+                                    
+                                    with col2:
+                                        st.subheader("✅ Corrected")
+                                        st.code(corrected_code, language="sql")
+                                    
+                                    # Option to use original or corrected
+                                    use_corrected = st.radio(
+                                        "Which version would you like to use?",
+                                        ["Corrected (Recommended)", "Original"],
+                                        index=0
+                                    )
+                                    
+                                    if use_corrected == "Original":
+                                        corrected_code = u_result.get("code", "")
+                                        st.info("Using original formula as requested")
+                                    else:
+                                        st.success("Using corrected formula")
+                        except Exception as e:
+                            logger.warning(f"Formula correction failed: {e}")
+                            st.warning(f"Could not auto-correct formula: {str(e)}")
+                    
+                    # Update u_result with corrected code
+                    u_result["code"] = corrected_code
+
+                    # Register the generated item in the registry so it appears in Created Items
+                    if u_result and u_result.get("code"):
+                        # Use explicit item_name if provided, otherwise extract from description
+                        if item_name.strip():
+                            final_item_name = item_name.strip()
+                        else:
+                            # Extract from description (format: "Name: Description" or just "Name")
+                            parts = description.strip().split(":")
+                            final_item_name = parts[0].strip() if parts else description.strip()
+                            
+                            # Fallback to auto-generated name if still empty
+                            if not final_item_name:
+                                final_item_name = f"{item_type}_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
+                        
+                        agent.registry.register(
+                            name=final_item_name,
+                            item_type=item_type,
+                            expression=u_result.get("code", ""),
+                            description=description.strip() + f"\n({u_result.get('type', output_language)} for {usage_target})"
+                        )
+                        st.success(f"✓ Saved to Created Items as '{final_item_name}'")
 
                     lang_map = {
                         "DAX": "sql",
