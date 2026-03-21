@@ -1,6 +1,6 @@
 """
-Formula Corrector Engine - Automatically fixes common LLM generation mistakes.
-Handles DAX, SQL, and PySpark formula corrections based on semantic intent.
+Enhanced Formula Corrector - Intelligently maps user intent to actual schema columns.
+Uses semantic analysis and column discovery to correctly identify tables and columns.
 """
 
 import re
@@ -9,382 +9,335 @@ from typing import Dict, List, Tuple, Optional, Any
 
 logger = logging.getLogger(__name__)
 
-# Knowledge base of correct formulas and patterns
-FORMULA_PATTERNS = {
-    "average_order_value": [
-        "DIVIDE(SUM({amount_col}), DISTINCTCOUNT({order_col}))",
-        "SUM({amount_col}) / DISTINCTCOUNT({order_col})",
-    ],
-    "total_sales": [
-        "SUM({sales_col})",
-    ],
-    "unique_customers": [
-        "DISTINCTCOUNT({customer_col})",
-    ],
-    "profit_margin": [
-        "DIVIDE(SUM({sales_col}) - SUM({cost_col}), SUM({sales_col}))",
-    ],
-    "month_over_month_growth": [
-        "DIVIDE([Current Month Sales] - [Previous Month Sales], [Previous Month Sales])",
-    ],
-}
 
-# Common mistakes and corrections
-COMMON_MISTAKES = {
-    # Pattern: SUM on ID/Key columns
-    r"SUM\s*\(\s*([A-Za-z_][A-Za-z0-9_]*)\s*\[\s*(.*?(?:Key|ID|EmployeeKey|ProductKey|OrderID|CustomerID)[^\]]*)\s*\]\s*\)": {
-        "issue": "Summing ID/Key columns (should use DISTINCTCOUNT or sum numeric values)",
-        "replace_with": "DISTINCTCOUNT({table}[{column}])",
-        "severity": "high"
-    },
+class SemanticColumnMatcher:
+    """Intelligently matches user intent to actual schema columns."""
     
-    # Pattern: Missing DISTINCTCOUNT in average calculations
-    r"AVERAGE\s*\(\s*([A-Za-z_][A-Za-z0-9_]*)\s*\[\s*([^\]]*Amount|SalesAmount|Price|Revenue)[^\]]*\]\s*\)": {
-        "issue": "Using AVERAGE on fact table amounts (should use DIVIDE with DISTINCTCOUNT)",
-        "severity": "medium",
-        "hint": "Use: DIVIDE(SUM(Table[Amount]), DISTINCTCOUNT(Table[OrderID]))"
-    },
-    
-    # Pattern: Creating measure with wrong name
-    r"^([A-Za-z0-9_]+)\s*=\s*SUM\s*\(\s*([A-Za-z_][A-Za-z0-9_]*)\s*\[\s*(?:Key|ID|EmployeeKey|ProductKey)[^\]]*\]\s*\)": {
-        "issue": "Measure created but with SUM on ID column",
-        "severity": "high"
-    },
-}
-
-
-class FormulaCorrector:
-    """Automatically corrects and validates formulas to match semantic intent."""
+    AMOUNT_KEYWORDS = ["amount", "sales", "revenue", "price", "total", "value", "sum", "qty"]
+    COST_KEYWORDS = ["cost", "expense", "unit cost"]
+    ID_KEYWORDS = ["key", "id", "identifier"]
+    DATE_KEYWORDS = ["date", "month", "year", "time", "period"]
+    COUNT_KEYWORDS = ["count", "number", "distinct", "unique", "orders", "orderid", "invoiceid", "transactionid", "order_id"]
     
     def __init__(self, metadata: Dict[str, Any]):
         self.metadata = metadata
         self.tables = metadata.get("tables", {})
         self.relationships = metadata.get("relationships", [])
+        self._build_index()
     
-    def correct_dax_formula(self, code: str, description: str, user_intent: str = "", item_type: str = "measure") -> Tuple[str, List[str]]:
-        """
-        Correct DAX formulas based on semantic intent and common patterns.
-        Returns: (corrected_code, warnings)
-        """
+    def _build_index(self):
+        """Index all columns by semantic type."""
+        self.index = {"amount": [], "cost": [], "id": [], "date": [], "count": [], "other": []}
+        
+        for table_name, table_info in self.tables.items():
+            columns = table_info.get("columns", {})
+            for col_name in columns.keys():
+                col_lower = col_name.lower()
+                
+                # Check count/order columns FIRST (before ID) since they're more specific
+                if any(kw in col_lower for kw in self.COUNT_KEYWORDS):
+                    self.index["count"].append((table_name, col_name))
+                elif any(kw in col_lower for kw in self.AMOUNT_KEYWORDS):
+                    self.index["amount"].append((table_name, col_name))
+                elif any(kw in col_lower for kw in self.COST_KEYWORDS):
+                    self.index["cost"].append((table_name, col_name))
+                elif any(kw in col_lower for kw in self.ID_KEYWORDS):
+                    self.index["id"].append((table_name, col_name))
+                elif any(kw in col_lower for kw in self.DATE_KEYWORDS):
+                    self.index["date"].append((table_name, col_name))
+                else:
+                    self.index["other"].append((table_name, col_name))
+    
+    def find_column(self, semantic_type: str, prefer_table: str = None) -> Optional[Tuple[str, str]]:
+        """Find column by semantic type. Returns (table, column)."""
+        candidates = self.index.get(semantic_type, [])
+        if not candidates:
+            return None
+        
+        if prefer_table:
+            for table_name, col_name in candidates:
+                if table_name == prefer_table:
+                    return (table_name, col_name)
+        
+        return candidates[0] if candidates else None
+    
+    def find_fact_table(self) -> Optional[str]:
+        """Find main fact table (most relationships)."""
+        rel_count = {}
+        for rel in self.relationships:
+            from_table = rel.get("from_table")
+            to_table = rel.get("to_table")
+            rel_count[from_table] = rel_count.get(from_table, 0) + 1
+            rel_count[to_table] = rel_count.get(to_table, 0) + 1
+        
+        if rel_count:
+            return max(rel_count, key=rel_count.get)
+        
+        # Fallback: table with most amount columns
+        best = max([(t, len([c for tb, c in self.index["amount"] if tb == t])) for t in self.tables.keys()], 
+                   key=lambda x: x[1], default=(None, 0))
+        return best[0] if best[0] else next(iter(self.tables.keys())) if self.tables else None
+
+
+class FormulaCorrector:
+    """Intelligently corrects and generates formulas."""
+    
+    def __init__(self, metadata: Dict[str, Any]):
+        self.metadata = metadata
+        self.tables = metadata.get("tables", {})
+        self.relationships = metadata.get("relationships", [])
+        self.matcher = SemanticColumnMatcher(metadata)
+    
+    def generate_dax_formula(self, description: str, item_type: str = "measure", table_name: str = None) -> Tuple[str, List[str]]:
+        """Generate DAX formula from intent description."""
         warnings = []
-        corrected = code
         
-        # Identify intent from description/user input
-        intent = self._identify_intent(description, user_intent)
+        fact_table = table_name or self.matcher.find_fact_table()
+        if not fact_table:
+            return "ERROR: No tables found", ["No metadata available"]
         
-        # Apply corrections based on item type and intent
+        intent = self._get_intent(description)
+        
         if item_type == "flag":
-            corrected, msg = self._fix_flag_formula(code, description)
-            if msg:
-                warnings.append(msg)
-        
-        elif intent == "average_order_value":
-            corrected, msg = self._fix_average_order_value(code)
-            if msg:
-                warnings.append(msg)
-        
-        elif intent == "total_sales":
-            corrected, msg = self._fix_total_sales(code)
-            if msg:
-                warnings.append(msg)
-        
-        elif intent == "profit_margin":
-            corrected, msg = self._fix_profit_margin(code)
-            if msg:
-                warnings.append(msg)
-        
-        # Check for common mistakes
-        mistake_warnings = self._check_common_mistakes(corrected, "DAX")
-        warnings.extend(mistake_warnings)
-        
-        return corrected, warnings
-    
-    def _identify_intent(self, description: str, user_intent: str = "") -> str:
-        """Identify what user is trying to do from description."""
-        combined = (description + " " + user_intent).lower()
-        
-        patterns = {
-            "average_order_value": ["average order", "avg order", "order value", "per order"],
-            "total_sales": ["total sales", "sum sales", "sales amount"],
-            "profit_margin": ["profit margin", "margin", "profit %"],
-            "unique_customers": ["unique customers", "customer count", "distinct customer"],
-            "month_over_month_growth": ["month over month", "mom growth", "previous month"],
-        }
-        
-        for intent, keywords in patterns.items():
-            if any(kw in combined for kw in keywords):
-                return intent
-        
-        return ""
-    
-    def _fix_average_order_value(self, code: str) -> Tuple[str, Optional[str]]:
-        """Fix Average Order Value calculations."""
-        code_upper = code.upper()
-        
-        # Wrong: SUM(Sales[EmployeeKey])
-        if "SUM" in code_upper and ("EMPLOYEEKEY" in code_upper or "ID" in code_upper):
-            # Find the amount column
-            amount_col = self._find_amount_column("Sales")
-            order_col = self._find_order_column("Sales")
-            
-            if amount_col and order_col:
-                corrected = f"DIVIDE(SUM(Sales[{amount_col}]), DISTINCTCOUNT(Sales[{order_col}]))"
-                return corrected, f"Fixed: Changed from SUM(ID) to proper AOV: DIVIDE(SUM({amount_col}), DISTINCTCOUNT({order_col}))"
-        
-        # Wrong: AVERAGE(Sales[SalesAmount]) - should be DIVIDE
-        if "AVERAGE" in code_upper and ("SALESAMOUNT" in code_upper or "AMOUNT" in code_upper):
-            amount_col = self._find_amount_column("Sales")
-            order_col = self._find_order_column("Sales")
-            
-            if amount_col and order_col:
-                corrected = f"DIVIDE(SUM(Sales[{amount_col}]), DISTINCTCOUNT(Sales[{order_col}]))"
-                return corrected, "Fixed: Changed from AVERAGE to proper AOV using DIVIDE"
-        
-        return code, None
-    
-    def _fix_total_sales(self, code: str) -> Tuple[str, Optional[str]]:
-        """Fix Total Sales calculations."""
-        # Find the correct sales column
-        amount_col = self._find_amount_column("Sales")
-        
-        if amount_col and "SUM" in code.upper():
-            # Check if summing wrong column
-            if not amount_col.lower() in code.lower():
-                corrected = f"SUM(Sales[{amount_col}])"
-                return corrected, f"Fixed: Changed to sum correct column: {amount_col}"
-        
-        return code, None
-    
-    def _fix_profit_margin(self, code: str) -> Tuple[str, Optional[str]]:
-        """Fix Profit Margin calculations."""
-        amount_col = self._find_amount_column("Sales")
-        cost_col = self._find_cost_column("Sales")
-        
-        if amount_col and cost_col:
-            if "SUM" in code.upper() and "DIVIDE" in code.upper():
-                # Structure looks right, just ensure columns are correct
-                if amount_col.lower() not in code.lower() or cost_col.lower() not in code.lower():
-                    corrected = f"DIVIDE(SUM(Sales[{amount_col}]) - SUM(Sales[{cost_col}]), SUM(Sales[{amount_col}]))"
-                    return corrected, f"Fixed: Ensured correct columns in profit margin calculation"
-        
-        return code, None
-    
-    def _fix_flag_formula(self, code: str, description: str) -> Tuple[str, Optional[str]]:
-        """Fix flag/conditional formulas (IF statements)."""
-        # Extract threshold value from description (e.g., "500$" or "> 500")
-        threshold_match = re.search(r'([\d.]+)\s*\$?', description)
-        threshold = threshold_match.group(1) if threshold_match else "0"
-        
-        # Identify what is being compared
-        is_cost_related = any(x in description.lower() for x in ["cost", "expense", "expense"])
-        is_sales_related = any(x in description.lower() for x in ["sales", "revenue", "amount"])
-        is_count_related = any(x in description.lower() for x in ["count", "number", "quantity"])
-        
-        # Find the right column
-        if is_cost_related:
-            column = self._find_cost_column("Sales")
-            metric = f"SUM(Sales[{column}])" if column else "SUM(Sales[Cost])"
-        elif is_sales_related:
-            column = self._find_amount_column("Sales")
-            metric = f"SUM(Sales[{column}])" if column else "SUM(Sales[SalesAmount])"
-        elif is_count_related:
-            column = self._find_order_column("Sales")
-            metric = f"DISTINCTCOUNT(Sales[{column}])" if column else "DISTINCTCOUNT(Sales[OrderID])"
+            formula = self._make_flag(description, fact_table)
+        elif "average" in intent:
+            formula = self._make_average(fact_table)
+        elif "profit" in intent:
+            formula = self._make_profit(fact_table)
+        elif "ytd" in intent:
+            formula = self._make_ytd(fact_table)
         else:
-            # Default to trying to fix the code
-            metric = None
-        
-        # Check if current code is wrong (summing ID columns)
-        code_upper = code.upper()
-        if "SUM" in code_upper and ("EMPLOYEEKEY" in code_upper or "PRODUCTKEY" in code_upper or "ID" in code_upper):
-            if metric:
-                corrected = f'IF({metric} > {threshold}, "Yes", "No")'
-                return corrected, f"Fixed: Changed from SUM(ID) to SUM({column}) with threshold {threshold}"
-        
-        # Check if threshold is wrong (> 0 instead of > 500)
-        if "> 0" in code or ">0" in code:
-            if metric:
-                corrected = f'IF({metric} > {threshold}, "Yes", "No")'
-                return corrected, f"Fixed: Updated threshold from >0 to >{threshold}"
-        
-        return code, None
-    
-    def _find_amount_column(self, table_name: str) -> Optional[str]:
-        """Find the amount/sales column in a table."""
-        if table_name not in self.tables:
-            return None
-        
-        columns = self.tables[table_name].get("columns", {})
-        
-        # Look for common amount columns
-        for col in columns.keys():
-            col_lower = col.lower()
-            if any(x in col_lower for x in ["salesamount", "amount", "revenue", "price", "sales"]):
-                return col
-        
-        return None
-    
-    def _find_cost_column(self, table_name: str) -> Optional[str]:
-        """Find the cost column in a table."""
-        if table_name not in self.tables:
-            return None
-        
-        columns = self.tables[table_name].get("columns", {})
-        
-        for col in columns.keys():
-            col_lower = col.lower()
-            if any(x in col_lower for x in ["cost", "productcost", "unitcost"]):
-                return col
-        
-        return None
-    
-    def _find_order_column(self, table_name: str) -> Optional[str]:
-        """Find the order ID column."""
-        if table_name not in self.tables:
-            return None
-        
-        columns = self.tables[table_name].get("columns", {})
-        
-        for col in columns.keys():
-            col_lower = col.lower()
-            if any(x in col_lower for x in ["orderid", "order_id", "invoice"]):
-                return col
-        
-        return None
-    
-    def _check_common_mistakes(self, code: str, language: str) -> List[str]:
-        """Check for common mistakes in generated code."""
-        warnings = []
-        
-        if language.upper() == "DAX":
-            # Check: Summing ID columns
-            id_pattern = r"SUM\s*\(\s*\w+\s*\[\s*\w*(?:Key|ID|EmployeeKey|ProductKey|OrderID)\w*\s*\]\s*\)"
-            if re.search(id_pattern, code, re.IGNORECASE):
-                warnings.append("⚠️ CRITICAL: Found SUM on ID/Key column. This will give wrong results. Use DISTINCTCOUNT instead.")
-            
-            # Check: Missing qualified column names
-            if "[" in code and "]" in code:
-                # Should have Table[Column] format
-                unqualified = re.findall(r"(?:SUM|AVERAGE|COUNT)\s*\(\s*\[", code)
-                if unqualified:
-                    warnings.append("⚠️ Column names should be qualified: Table[Column], not just [Column]")
-            
-            # Check: Unbalanced parentheses
-            if code.count("(") != code.count(")"):
-                warnings.append("❌ Unbalanced parentheses - formula is invalid")
-        
-        return warnings
-    
-    def generate_dax_formula(self, description: str, item_type: str = "measure", table_name: str = "Sales") -> Tuple[str, List[str]]:
-        """
-        GENERATE a DAX formula from scratch based on description.
-        Returns: (generated_formula, warnings)
-        """
-        warnings = []
-        description_lower = description.lower()
-        
-        # Identify intent
-        intent = self._identify_intent(description)
-        
-        # Generate formula based on intent
-        if item_type == "flag":
-            # Flag: IF statement with threshold
-            formula = self._generate_flag_formula(description)
-        elif "average order" in description_lower:
-            formula = self._generate_average_order_value_formula(table_name)
-        elif "total sales" in description_lower or "sum of sales" in description_lower:
-            formula = self._generate_total_sales_formula(table_name)
-        elif "profit margin" in description_lower:
-            formula = self._generate_profit_margin_formula(table_name)
-        elif "year to date" in description_lower or "ytd" in description_lower:
-            formula = self._generate_ytd_formula(table_name)
-        elif "unique" in description_lower or "distinct" in description_lower or "count" in description_lower:
-            formula = self._generate_distinct_count_formula(table_name)
-        else:
-            # Fallback: use suggest_formula
-            formula = self.suggest_formula(description, table_name)
-            if not formula:
-                formula = f"PLACEHOLDER -- Could not generate formula for: {description}"
-                warnings.append(f"⚠️ No matching pattern for: {description}")
+            formula = self._make_sum(fact_table)
         
         return formula, warnings
     
-    def _generate_flag_formula(self, description: str) -> str:
-        """Generate IF flag formula from description."""
-        # Extract threshold
-        threshold_match = re.search(r'([\d.]+)\s*\$?', description)
-        threshold = threshold_match.group(1) if threshold_match else "0"
+    def correct_dax_formula(self, code: str, description: str, user_intent: str = "", item_type: str = "measure") -> Tuple[str, List[str]]:
+        """Correct user-provided formula."""
+        warnings = []
+        corrected = code
         
-        # Identify column type
-        is_cost = any(x in description.lower() for x in ["cost", "expense"])
-        is_sales = any(x in description.lower() for x in ["sales", "revenue", "amount"])
-        is_count = any(x in description.lower() for x in ["count", "number", "quantity", "orders"])
+        # Check for mistakes
+        if "SUM" in code.upper() and any(x in code.upper() for x in ["KEY", "ID"]):
+            warnings.append("⚠️ WARNING: SUM on ID column detected")
+            if item_type == "flag":
+                corrected, msg = self._fix_flag(code, description)
+            else:
+                corrected, msg = self._auto_fix(code, description, item_type)
         
-        # Generate metric
-        if is_cost:
-            cost_col = self._find_cost_column("Sales") or "ProductCost"
-            metric = f"SUM(Sales[{cost_col}])"
-        elif is_sales or not is_count:  # Default to sales
-            amount_col = self._find_amount_column("Sales") or "SalesAmount"
-            metric = f"SUM(Sales[{amount_col}])"
+        # Validate
+        val_warnings = self._validate(corrected)
+        warnings.extend(val_warnings)
+        
+        return corrected, warnings
+    
+    def _get_intent(self, description: str) -> str:
+        """Identify intent from description."""
+        d = description.lower()
+        if "average" in d:
+            return "average"
+        elif "profit" in d:
+            return "profit"
+        elif "ytd" in d or "year" in d:
+            return "ytd"
+        return "sum"
+    
+    def _make_flag(self, description: str, fact_table: str) -> str:
+        """Generate IF flag formula."""
+        match = re.search(r'[\$]?\s*([\d.]+)', description)
+        threshold = match.group(1) if match else "100"
+        
+        d = description.lower()
+        if "cost" in d:
+            col = self.matcher.find_column("cost", fact_table)
+            metric = f"SUM({col[0]}[{col[1]}])" if col else f"SUM({fact_table}[Cost])"
+        elif "count" in d or "order" in d:
+            col = self.matcher.find_column("count", fact_table)
+            metric = f"DISTINCTCOUNT({col[0]}[{col[1]}])" if col else f"DISTINCTCOUNT({fact_table}[OrderID])"
         else:
-            order_col = self._find_order_column("Sales") or "OrderID"
-            metric = f"DISTINCTCOUNT(Sales[{order_col}])"
+            col = self.matcher.find_column("amount", fact_table)
+            metric = f"SUM({col[0]}[{col[1]}])" if col else f"SUM({fact_table}[Amount])"
         
-        # Return as IF formula
         return f'IF({metric} > {threshold}, "Yes", "No")'
     
+    def _make_average(self, fact_table: str) -> str:
+        """Generate average formula."""
+        amt = self.matcher.find_column("amount", fact_table)
+        cnt = self.matcher.find_column("count", fact_table)
+        
+        if not (amt and cnt):
+            return f"ERROR: Missing columns"
+        
+        return f"DIVIDE(SUM({amt[0]}[{amt[1]}]), DISTINCTCOUNT({cnt[0]}[{cnt[1]}]))"
+    
+    def _make_profit(self, fact_table: str) -> str:
+        """Generate profit formula."""
+        amt = self.matcher.find_column("amount", fact_table)
+        cst = self.matcher.find_column("cost", fact_table)
+        
+        if not (amt and cst):
+            return f"ERROR: Missing columns"
+        
+        return f"DIVIDE(SUM({amt[0]}[{amt[1]}]) - SUM({cst[0]}[{cst[1]}]), SUM({amt[0]}[{amt[1]}]))"
+    
+    def _make_ytd(self, fact_table: str) -> str:
+        """Generate year-to-date formula."""
+        amt = self.matcher.find_column("amount", fact_table)
+        if not amt:
+            return f"ERROR: Missing amount column"
+        
+        date_col = self.matcher.find_column("date")
+        date_table = date_col[0] if date_col else "Dates"
+        date_name = date_col[1] if date_col else "Date"
+        
+        return f"CALCULATE(SUM({amt[0]}[{amt[1]}]), DATESYTD({date_table}[{date_name}]))"
+    
+    def _make_sum(self, fact_table: str) -> str:
+        """Generate sum formula."""
+        amt = self.matcher.find_column("amount", fact_table)
+        if not amt:
+            return f"ERROR: Missing amount column"
+        
+        return f"SUM({amt[0]}[{amt[1]}])"
+    
+    def _fix_flag(self, code: str, description: str) -> Tuple[str, Optional[str]]:
+        """Fix flag formula."""
+        match = re.search(r'[\$]?\s*([\d.]+)', description)
+        threshold = match.group(1) if match else "100"
+        
+        fact_table = self.matcher.find_fact_table()
+        d = description.lower()
+        
+        # Determine metric type from description
+        if "count" in d or "number of" in d or "orders" in d:
+            # Count-based metric - use DISTINCTCOUNT
+            col = self.matcher.find_column("count", fact_table)
+            if col:
+                metric = f"DISTINCTCOUNT({col[0]}[{col[1]}])"
+            else:
+                metric = f"DISTINCTCOUNT({fact_table}[OrderID])"
+        elif "cost" in d:
+            col = self.matcher.find_column("cost", fact_table)
+            metric = f"SUM({col[0]}[{col[1]}])" if col else f"SUM({fact_table}[Cost])"
+        else:
+            col = self.matcher.find_column("amount", fact_table)
+            metric = f"SUM({col[0]}[{col[1]}])" if col else f"SUM({fact_table}[Amount])"
+        
+        corrected = f'IF({metric} > {threshold}, "Yes", "No")'
+        
+        return corrected, f"Fixed: Using {metric.split('[')[1].split(']')[0] if '[' in metric else 'column'} with threshold >{threshold}"
+    
+    def _auto_fix(self, code: str, description: str, item_type: str) -> Tuple[str, Optional[str]]:
+        """Auto-correct formula."""
+        fact_table = self.matcher.find_fact_table()
+        
+        if item_type == "flag":
+            corrected = self._make_flag(description, fact_table)
+        elif "average" in description.lower():
+            corrected = self._make_average(fact_table)
+        elif "profit" in description.lower():
+            corrected = self._make_profit(fact_table)
+        else:
+            corrected = self._make_sum(fact_table)
+        
+        if corrected.startswith("ERROR"):
+            return code, None
+        
+        return corrected, "Auto-corrected based on schema"
+    
+    def _validate(self, code: str) -> List[str]:
+        """Validate formula."""
+        warnings = []
+        
+        if code.count("(") != code.count(")"):
+            warnings.append("❌ Unbalanced parentheses")
+        
+        if code.count("[") != code.count("]"):
+            warnings.append("❌ Unbalanced brackets")
+        
+        id_pat = r"SUM\s*\(\s*\w+\s*\[\s*\w*(?:Key|ID|key|id)\w*\s*\]\s*\)"
+        if re.search(id_pat, code):
+            warnings.append("⚠️ SUM on ID column - use DISTINCTCOUNT")
+        
+        return warnings
+    
+    def suggest_formula(self, intent: str, table_name: str = None) -> Optional[str]:
+        """Suggest formula by intent."""
+        fact_table = table_name or self.matcher.find_fact_table()
+        if not fact_table:
+            return None
+        
+        d = intent.lower()
+        if "average" in d:
+            return self._make_average(fact_table)
+        elif "profit" in d:
+            return self._make_profit(fact_table)
+        elif "ytd" in d:
+            return self._make_ytd(fact_table)
+        else:
+            return self._make_sum(fact_table)
+
+    def _find_amount_column(self, table_name: str) -> Optional[str]:
+        """Find amount column (for backward compatibility)."""
+        col = self.matcher.find_column("amount", table_name)
+        return col[1] if col else None
+    
+    def _find_cost_column(self, table_name: str) -> Optional[str]:
+        """Find cost column (for backward compatibility)."""
+        col = self.matcher.find_column("cost", table_name)
+        return col[1] if col else None
+    
+    def _find_order_column(self, table_name: str) -> Optional[str]:
+        """Find order column (for backward compatibility)."""
+        col = self.matcher.find_column("count", table_name)
+        return col[1] if col else None
+    
+    def _check_common_mistakes(self, code: str, language: str) -> List[str]:
+        """Check for mistakes (backward compatibility)."""
+        return self._validate(code)
+    
+    def _generate_flag_formula(self, description: str) -> str:
+        """Generate flag (backward compatibility)."""
+        fact_table = self.matcher.find_fact_table()
+        return self._make_flag(description, fact_table)
+    
     def _generate_average_order_value_formula(self, table_name: str) -> str:
-        """Generate Average Order Value formula."""
-        amount_col = self._find_amount_column(table_name) or "SalesAmount"
-        order_col = self._find_order_column(table_name) or "OrderID"
-        return f"DIVIDE(SUM({table_name}[{amount_col}]), DISTINCTCOUNT({table_name}[{order_col}]))"
+        """Generate average (backward compatibility)."""
+        return self._make_average(table_name)
     
     def _generate_total_sales_formula(self, table_name: str) -> str:
-        """Generate Total Sales formula."""
-        amount_col = self._find_amount_column(table_name) or "SalesAmount"
-        return f"SUM({table_name}[{amount_col}])"
+        """Generate sum (backward compatibility)."""
+        return self._make_sum(table_name)
     
     def _generate_profit_margin_formula(self, table_name: str) -> str:
-        """Generate Profit Margin formula."""
-        amount_col = self._find_amount_column(table_name) or "SalesAmount"
-        cost_col = self._find_cost_column(table_name) or "ProductCost"
-        return f"DIVIDE(SUM({table_name}[{amount_col}]) - SUM({table_name}[{cost_col}]), SUM({table_name}[{amount_col}]))"
+        """Generate profit (backward compatibility)."""
+        return self._make_profit(table_name)
     
     def _generate_ytd_formula(self, table_name: str) -> str:
-        """Generate Year-to-Date formula."""
-        amount_col = self._find_amount_column(table_name) or "SalesAmount"
-        return f"CALCULATE(SUM({table_name}[{amount_col}]), DATESYTD(Dates[Date]))"
+        """Generate YTD (backward compatibility)."""
+        return self._make_ytd(table_name)
     
     def _generate_distinct_count_formula(self, table_name: str) -> str:
-        """Generate Distinct Count formula."""
-        order_col = self._find_order_column(table_name) or "OrderID"
-        return f"DISTINCTCOUNT({table_name}[{order_col}])"
+        """Generate distinct count (backward compatibility)."""
+        col = self.matcher.find_column("count", table_name)
+        if col:
+            return f"DISTINCTCOUNT({col[0]}[{col[1]}])"
+        return f"DISTINCTCOUNT({table_name}[OrderID])"
     
-    def suggest_formula(self, intent: str, table_name: str = "Sales") -> Optional[str]:
-        """Suggest a correct formula based on intent."""
-        intent_lower = intent.lower()
-        
-        if "average order" in intent_lower:
-            amount_col = self._find_amount_column(table_name)
-            order_col = self._find_order_column(table_name)
-            if amount_col and order_col:
-                return f"DIVIDE(SUM({table_name}[{amount_col}]), DISTINCTCOUNT({table_name}[{order_col}]))"
-        
-        elif "total sales" in intent_lower or "total" in intent_lower:
-            amount_col = self._find_amount_column(table_name)
-            if amount_col:
-                return f"SUM({table_name}[{amount_col}])"
-        
-        elif "profit" in intent_lower and "margin" in intent_lower:
-            amount_col = self._find_amount_column(table_name)
-            cost_col = self._find_cost_column(table_name)
-            if amount_col and cost_col:
-                return f"DIVIDE(SUM({table_name}[{amount_col}]) - SUM({table_name}[{cost_col}]), SUM({table_name}[{amount_col}]))"
-        
-        elif "unique" in intent_lower or "distinct" in intent_lower or "count" in intent_lower:
-            order_col = self._find_order_column(table_name)
-            if order_col:
-                return f"DISTINCTCOUNT({table_name}[{order_col}])"
-        
-        return None
+    def _identify_intent(self, description: str, user_intent: str = "") -> str:
+        """Identify intent (backward compatibility)."""
+        return self._get_intent(description + " " + user_intent)
+    
+    def _fix_average_order_value(self, code: str) -> Tuple[str, Optional[str]]:
+        """Fix AOV (backward compatibility)."""
+        fact_table = self.matcher.find_fact_table()
+        return self._auto_fix(code, "average order value", "measure")
+    
+    def _fix_total_sales(self, code: str) -> Tuple[str, Optional[str]]:
+        """Fix total sales (backward compatibility)."""
+        fact_table = self.matcher.find_fact_table()
+        return self._auto_fix(code, "total sales", "measure")
+    
+    def _fix_profit_margin(self, code: str) -> Tuple[str, Optional[str]]:
+        """Fix profit (backward compatibility)."""
+        fact_table = self.matcher.find_fact_table()
+        return self._auto_fix(code, "profit margin", "measure")
