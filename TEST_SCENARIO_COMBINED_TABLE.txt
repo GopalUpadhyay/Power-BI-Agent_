@@ -1,0 +1,267 @@
+╔════════════════════════════════════════════════════════════════════════╗
+║                    TEST SCENARIO - COMBINED TABLE                      ║
+║              Sales Performance & Target Analysis (Combined Data)       ║
+╚════════════════════════════════════════════════════════════════════════╝
+
+AVAILABLE UPLOADED FILES:
+═════════════════════════════════════════════════════════════════════════
+1. Targets.csv          - Sales targets per employee/region
+2. SalesPerson.csv      - Sales person details
+3. Sales.csv            - Sales transactions
+4. Region.csv           - Region information
+5. Product.csv          - Product details
+
+
+═════════════════════════════════════════════════════════════════════════
+NEW COMBINED TABLE: SalesPerformanceAnalysis
+═════════════════════════════════════════════════════════════════════════
+
+Purpose: Multi-dimensional sales analytics combining:
+  ✓ Sales individuals (SalesPerson)
+  ✓ Their sales transactions (Sales)
+  ✓ Sale targets (Targets)
+  ✓ Product details (Product)
+  ✓ Regional information (Region)
+
+Use Case: Executive dashboard to track:
+  - Individual salesperson performance vs targets
+  - Product-wise sales by region
+  - Target achievement rates
+  - Sales rep productivity metrics
+
+
+═════════════════════════════════════════════════════════════════════════
+EXPECTED TABLE STRUCTURE:
+═════════════════════════════════════════════════════════════════════════
+
+Column Name              | Source Table      | Description
+────────────────────────────────────────────────────────────────────────
+SalesPersonID           | SalesPerson       | Unique person identifier
+SalesPersonName         | SalesPerson       | Employee name
+RegionID                | SalesPerson/Region| Region identifier
+RegionName              | Region            | Region name
+ProductID               | Product           | Product identifier
+ProductName             | Product           | Product description
+SalesAmount             | Sales             | Transaction amount
+TransactionDate         | Sales             | When sale occurred
+TargetAmount            | Targets           | Sales target
+TargetDate              | Targets           | Target period
+AchievementPercentage   | CALCULATED        | (SalesAmount/TargetAmount)*100
+StatusVsTarget          | CALCULATED        | "Exceeded"/"Met"/"Below"
+
+
+═════════════════════════════════════════════════════════════════════════
+STEP-BY-STEP TEST INSTRUCTIONS:
+═════════════════════════════════════════════════════════════════════════
+
+STEP 1: Start the Application & Open UI
+─────────────────────────────────────────────────────────────────────────
+In terminal:
+  cd /home/gopal-upadhyay/AI_Bot_MAQ
+  python start.py
+
+Wait for browser to open (or go to http://localhost:8501)
+Then click "Create New Data Model" button
+3. Enter Table Name: SalesPerformanceAnalysis
+4. Select Table Type: Composite/Combined Table
+5. Click "Next"
+
+
+STEP 2: Select Source Tables
+─────────────────────────────────────────────────────────────────────────
+6. Check boxes for:
+   ✓ SalesPerson
+   ✓ Sales
+   ✓ Targets
+   ✓ Product
+   ✓ Region
+
+7. Click "Next"
+
+
+STEP 3: Define Relationships
+─────────────────────────────────────────────────────────────────────────
+8. System should auto-detect relationships:
+   ✓ Sales → SalesPerson (via EmployeeID/SalesPersonID)
+   ✓ Sales → Product (via ProductID)
+   ✓ SalesPerson → Region (via RegionID)
+   ✓ Targets → SalesPerson (via EmployeeID)
+
+9. Verify all relationships show green checkmarks
+10. Click "Validate Relationships"
+
+
+STEP 4: Map Columns
+─────────────────────────────────────────────────────────────────────────
+11. Select columns to include in final table:
+
+From SalesPerson:
+   ✓ EmployeeID → SalesPersonID
+   ✓ Name → SalesPersonName
+   ✓ RegionID → RegionID
+
+From Sales:
+   ✓ Amount → SalesAmount
+   ✓ Date → TransactionDate
+   ✓ ProductID → ProductID
+
+From Product:
+   ✓ ProductName → ProductName
+
+From Region:
+   ✓ RegionName → RegionName
+
+From Targets:
+   ✓ TargetAmount → TargetAmount
+   ✓ TargetDate → TargetDate
+
+12. Click "Next"
+
+
+STEP 5: Add Calculated Columns (Optional)
+─────────────────────────────────────────────────────────────────────────
+13. Click "Add Calculated Column"
+
+First Calculation:
+   Name: AchievementPercentage
+   Formula: (SalesAmount / TargetAmount) * 100
+   Data Type: Decimal
+   Format: 2 decimal places
+
+14. Click "Add Another"
+
+Second Calculation:
+   Name: StatusVsTarget
+   Formula: IF(SalesAmount >= TargetAmount, "Exceeded", 
+                IF(SalesAmount >= TargetAmount * 0.9, "Met", "Below"))
+   Data Type: Text
+
+15. Click "Finish"
+
+
+STEP 6: Preview & Save
+─────────────────────────────────────────────────────────────────────────
+16. Preview the generated table
+17. Verify columns appear correctly
+18. Check row count (should be: multiple sales per rep × number of products)
+19. Click "Create Table"
+
+
+EXPECTED SUCCESS CRITERIA:
+═════════════════════════════════════════════════════════════════════════
+
+✓ Table Created Successfully
+  - Name: SalesPerformanceAnalysis
+  - Status: Active/Ready
+  
+✓ Data Loaded Correctly
+  - All columns visible with correct data types
+  - No NULL values in key fields
+  - Auto-detected relationships validated
+  
+✓ Relationships Identified
+  - Green checkmarks on all 4 relationships
+  - Confidence scores ≥ 0.8
+  - Foreign key constraints established
+  
+✓ Data Quality
+  - Row count matches expected (sales transactions × dimensions)
+  - Calculated columns show correct formulas
+  - No duplicate rows
+  
+✓ Query able
+  - Can filter by SalesPersonName
+  - Can filter by RegionName
+  - Can filter by ProductName
+  - Can sort by AchievementPercentage
+
+
+═════════════════════════════════════════════════════════════════════════
+SAMPLE DATA YOU SHOULD SEE:
+═════════════════════════════════════════════════════════════════════════
+
+Example Row:
+┌─────────────────────────────────────────────────────────────────────┐
+│ SalesPersonID: SP001                                               │
+│ SalesPersonName: John Smith                                        │
+│ RegionID: R01                                                      │
+│ RegionName: North America                                          │
+│ ProductID: P123                                                    │
+│ ProductName: Premium Product X                                    │
+│ SalesAmount: $50,000                                               │
+│ TransactionDate: 2026-03-15                                       │
+│ TargetAmount: $45,000                                              │
+│ TargetDate: 2026-03-31                                            │
+│ AchievementPercentage: 111.11%                                    │
+│ StatusVsTarget: Exceeded                                           │
+└─────────────────────────────────────────────────────────────────────┘
+
+
+═════════════════════════════════════════════════════════════════════════
+TROUBLESHOOTING:
+═════════════════════════════════════════════════════════════════════════
+
+If table doesn't create:
+
+❌ Error: "Relationships not detected"
+   → Click "🔗 Identify Relationships" in UI
+   → Verify confidence scores ≥ 0.6
+   → Manually map if needed
+
+❌ Error: "Column mismatch"
+   → Verify all source tables are loaded
+   → Check column names match exactly (case-sensitive)
+   → Clear cache: ~/.streamlit/cache/
+
+❌ Error: "Data type mismatch"
+   → Check numeric columns in SalesAmount/TargetAmount
+   → Verify date columns in TransactionDate/TargetDate
+   → Convert if necessary before combining
+
+❌ Error: "Row count is 0"
+   → Check relationships are properly linked
+   → Verify foreign keys exist in source data
+   → Check for orphaned records
+
+
+═════════════════════════════════════════════════════════════════════════
+ALTERNATIVE SIMPLER SCENARIO (If above is complex):
+═════════════════════════════════════════════════════════════════════════
+
+Table Name: RegionalSalesView
+
+Combines:
+  ✓ SalesPerson + Sales + Region (only 3 tables)
+
+Columns:
+  - SalesPersonName, RegionName, SalesAmount, TransactionDate
+
+Relationships: 2 (SalesPerson→Region, Sales→SalesPerson)
+
+Expected: ~20-50 rows
+
+
+═════════════════════════════════════════════════════════════════════════
+QUICK TEST CHECKLIST:
+═════════════════════════════════════════════════════════════════════════
+
+□ Table creation button works
+□ Can select multiple source tables
+□ Relationships auto-detected (5 tables = 4 relationships)
+□ All detected relationships show green ✓
+□ Column mapping displays correctly
+□ Can add calculated columns
+□ Preview shows realistic data
+□ Table saves without errors
+□ Can view table schema
+□ Can query/filter the combined table
+
+
+═════════════════════════════════════════════════════════════════════════
+
+Test Created: March 20, 2026
+Complexity: Medium (5 tables, 4 relationships, 2 calculated columns)
+Expected Duration: 5-10 minutes
+Files Used: All 5 uploaded CSVs
+
+═════════════════════════════════════════════════════════════════════════

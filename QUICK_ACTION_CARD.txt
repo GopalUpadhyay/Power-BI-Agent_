@@ -1,0 +1,243 @@
+═════════════════════════════════════════════════════════════════════════
+                    QUICK ACTION CARD (TL;DR VERSION)
+═════════════════════════════════════════════════════════════════════════
+
+Print this page or keep it visible while testing
+
+
+═════════════════════════════════════════════════════════════════════════
+ACTION: START APP
+═════════════════════════════════════════════════════════════════════════
+
+Terminal:
+  cd /home/gopal-upadhyay/AI_Bot_MAQ && python start.py
+
+Browser:
+  Open http://localhost:8501
+
+
+═════════════════════════════════════════════════════════════════════════
+ACTION: CREATE MODEL
+═════════════════════════════════════════════════════════════════════════
+
+Location: Top of "Model Hub" tab
+
+1. Input Box 1: Type "SalesWithPersonDetails"
+2. Input Box 2: Type "Sales person combined data" (optional)
+3. Button: Click [ Create Model ]
+
+Expected: Green ✓ message "Created model card..."
+
+
+═════════════════════════════════════════════════════════════════════════
+ACTION: OPEN YOUR MODEL
+═════════════════════════════════════════════════════════════════════════
+
+Location: "Available Model Cards" section (scroll down)
+
+1. Find: "SalesWithPersonDetails"
+2. Button: Click [ Open ]
+
+Expected: Model switches to active
+
+
+═════════════════════════════════════════════════════════════════════════
+ACTION: UPLOAD FILES
+═════════════════════════════════════════════════════════════════════════
+
+Location: Bottom of "Model Hub" tab (scroll to bottom)
+Section: "Upload PBIX / screenshot / metadata files"
+
+1. Click: Gray upload area
+2. Navigate: to /home/gopal-upadhyay/AI_Bot_MAQ/assistant_app/uploads/
+3. Select: SalesPerson.csv AND Sales.csv (Ctrl+Click both)
+4. Click: [Open] in file browser
+
+Expected: File names appear in upload widget
+
+
+═════════════════════════════════════════════════════════════════════════
+ACTION: PROCESS FILES
+═════════════════════════════════════════════════════════════════════════
+
+Location: Below file upload area
+
+1. Button: Click [ Store Uploaded Files ]
+2. Wait: 3-5 seconds
+
+Expected: Green ✓ "Stored 2 file(s)... Detected X relationship(s)..."
+
+
+═════════════════════════════════════════════════════════════════════════
+ACTION: DETECT RELATIONSHIPS
+═════════════════════════════════════════════════════════════════════════
+
+Location: Top buttons in "Active Model" section
+
+1. Button: Click [ 🔗 Identify Relationships ]
+2. Wait: 2-3 seconds
+
+Expected: Blue ✓ "Identified 1 relationship(s) (1 new)."
+          Relationship table appears below
+
+
+═════════════════════════════════════════════════════════════════════════
+ACTION: VERIFY RELATIONSHIP
+═════════════════════════════════════════════════════════════════════════
+
+Location: Relationship Validation & Editing table (appeared from previous step)
+
+Check the table row:
+  ✓ from_table should be: Sales
+  ✓ from_column should be: EmployeeID
+  ✓ to_table should be: SalesPerson
+  ✓ to_column should be: EmployeeID
+
+(If any field is wrong, click it and edit)
+
+
+═════════════════════════════════════════════════════════════════════════
+ACTION: SAVE RELATIONSHIPS
+═════════════════════════════════════════════════════════════════════════
+
+Location: Below the relationship table
+
+1. Button: Click [ 💾 Save Relationship Edits ]
+2. Wait: 1-2 seconds
+
+Expected: Green ✓ "Relationship edits saved successfully."
+
+
+═════════════════════════════════════════════════════════════════════════
+ACTION: VIEW COMPLETED MODEL
+═════════════════════════════════════════════════════════════════════════
+
+Location: Top buttons in "Active Model" section
+
+1. Button: Click [ 📋 View Model ]
+
+Expected: Two sections expand:
+  - Tables: Shows SalesPerson & Sales with their columns
+  - Relationships: Shows Sales → SalesPerson link
+
+
+═════════════════════════════════════════════════════════════════════════
+SUCCESS = ALL THESE APPEAR:
+═════════════════════════════════════════════════════════════════════════
+
+✅ Model "SalesWithPersonDetails" exists
+✅ 2 files uploaded successfully
+✅ 1 relationship detected (Sales → SalesPerson)
+✅ Relationship saved
+✅ Schema viewable with tables and relationships
+
+
+═════════════════════════════════════════════════════════════════════════
+BUTTON REFERENCE MAP
+═════════════════════════════════════════════════════════════════════════
+
+Button Name              │ Order │ Location
+────────────────────────┼───────┼──────────────────────
+Create Model            │ 1st   │ Top of "Model Hub" tab
+Open [Model name]       │ 2nd   │ Available Model Cards
+[File Upload]           │ 3rd   │ Bottom of "Model Hub" tab
+Store Uploaded Files    │ 4th   │ Below upload area
+Identify Relationships  │ 5th   │ Top action buttons
+Save Relationship Edits │ 6th   │ Below relationship table
+View Model              │ 7th   │ Top action buttons
+
+
+═════════════════════════════════════════════════════════════════════════
+KEYBOARD SHORTCUTS:
+═════════════════════════════════════════════════════════════════════════
+
+Ctrl+R or Cmd+R: Refresh browser (if something stuck)
+Ctrl+Shift+J: Open browser console (if need to debug)
+Ctrl+Click: Select multiple files
+
+
+═════════════════════════════════════════════════════════════════════════
+TROUBLESHOOTING QUICKFIXES:
+═════════════════════════════════════════════════════════════════════════
+
+Problem                      │ Fix
+─────────────────────────────┼──────────────────────────
+Files not uploading          │ Browser refresh (Ctrl+R)
+0 relationships found        │ Click "Re-Detect" button
+Can't find "Available Cards" │ Scroll down page
+Model not in dropdown        │ Page refresh
+Button not responding        │ Wait 2-3 seconds, try again
+Orange/red error message     │ File format or data issue
+
+
+═════════════════════════════════════════════════════════════════════════
+EXPECTED FILE PATHS:
+═════════════════════════════════════════════════════════════════════════
+
+CSV Files Location:
+  /home/gopal-upadhyay/AI_Bot_MAQ/assistant_app/uploads/
+
+Files to Select:
+  ✓ SalesPerson.csv
+  ✓ Sales.csv
+
+Model Metadata Storage:
+  ~/.ai_bot_model_store/ (auto-created)
+
+
+═════════════════════════════════════════════════════════════════════════
+SAMPLE OUTPUT YOU SHOULD SEE:
+═════════════════════════════════════════════════════════════════════════
+
+After "Identify Relationships":
+
+┌────────┬────────────┬─────────────┬────────────┬────────────┐
+│ name   │ from_table │ from_column │ to_table   │ to_column  │
+├────────┼────────────┼─────────────┼────────────┼────────────┤
+│ Sales_ │ Sales      │ EmployeeID  │ SalesPerson│ EmployeeID │
+│ Person │            │             │            │            │
+└────────┴────────────┴─────────────┴────────────┴────────────┘
+
+
+═════════════════════════════════════════════════════════════════════════
+TIME ESTIMATE:
+═════════════════════════════════════════════════════════════════════════
+
+Step 1 (App start): 5 seconds
+Step 2 (Create model): 10 seconds
+Step 3 (Open model): 3 seconds
+Step 4 (Upload files): 20 seconds
+Step 5 (Process files): 5 seconds
+Step 6 (Detect relationships): 5 seconds
+Step 7 (Verify relationships): 10 seconds
+Step 8 (Save relationships): 3 seconds
+Step 9 (View model): 3 seconds
+
+TOTAL: ~10 minutes
+
+
+═════════════════════════════════════════════════════════════════════════
+TEST STATUS TRACKER
+═════════════════════════════════════════════════════════════════════════
+
+Copy this section and fill in:
+
+Start Time: __________
+End Time: __________
+
+SUCCESS: [ ] YES  [ ] NO  [ ] PARTIAL
+
+Last Step Completed: _______________
+Error message (if any): _____________________________________
+
+═════════════════════════════════════════════════════════════════════════
+ADVANCED NEXT STEPS (After success):
+═════════════════════════════════════════════════════════════════════════
+
+Try SCENARIO 2: Add Product.csv + Region.csv
+  → 4 tables, 3 relationships expected
+
+Try SCENARIO 3: Add Targets.csv + Calculated Columns
+  → 5 tables, 4 relationships, 2 calculated columns
+
+═════════════════════════════════════════════════════════════════════════

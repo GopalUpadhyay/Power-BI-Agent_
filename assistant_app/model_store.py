@@ -188,6 +188,9 @@ class ModelStore:
             notes.append(f"Uploaded file stored: {file_path.name}")
 
         self.save_metadata(model_id, metadata)
+        
+        # Auto-detect relationships based on column names
+        self._detect_relationships(model_id)
 
     def _merge_metadata(self, base: Dict[str, Any], incoming: Dict[str, Any]) -> Dict[str, Any]:
         result = dict(base)
@@ -219,3 +222,258 @@ class ModelStore:
             result["measures"].update(incoming.get("measures", {}))
 
         return result
+
+    def _detect_relationships(self, model_id: str) -> None:
+        """Auto-detect relationships with confidence scoring to avoid false positives."""
+        metadata = self.load_metadata(model_id)
+        if not metadata or "tables" not in metadata:
+            return
+        
+        tables = metadata.get("tables", {})
+        existing_rels = set()
+        
+        # Track existing relationships to avoid duplicates
+        for rel in metadata.get("relationships", []):
+            key = (
+                rel.get("from_table", ""),
+                rel.get("from_column", ""),
+                rel.get("to_table", ""),
+                rel.get("to_column", ""),
+            )
+            existing_rels.add(key)
+        
+        # Get all table names and their columns
+        table_names = list(tables.keys())
+        
+        # Look for matching columns between tables (potential foreign keys)
+        detected_rels = []
+        for i, table1 in enumerate(table_names):
+            cols1 = set(tables[table1].get("columns", {}).keys())
+            
+            for j, table2 in enumerate(table_names):
+                if i >= j:  # Avoid duplicates and self-relationships
+                    continue
+                
+                cols2 = set(tables[table2].get("columns", {}).keys())
+                
+                # Find matching column names
+                matching_cols = cols1 & cols2
+                for col in matching_cols:
+                    # Check if column looks like a key
+                    is_key_like = self._is_likely_key_column(col)
+                    
+                    if is_key_like:
+                        # Compute confidence score for this relationship
+                        confidence = self._compute_relationship_confidence(col, table1, table2)
+                        
+                        # Only create relationship if confidence is high enough
+                        if confidence >= 0.6:
+                            rel_key1 = (table1, col, table2, col)
+                            
+                            if rel_key1 not in existing_rels:
+                                detected_rels.append({
+                                    "name": f"{table1}_{table2}_{col}",
+                                    "from_table": table1,
+                                    "from_column": col,
+                                    "to_table": table2,
+                                    "to_column": col,
+                                    "confidence": round(confidence, 2),
+                                    "validated": confidence >= 0.9,
+                                })
+                                existing_rels.add(rel_key1)
+        
+        # Update metadata with detected relationships
+        if detected_rels:
+            metadata.setdefault("relationships", []).extend(detected_rels)
+            notes = metadata.get("ingestion_notes", [])
+            high_conf = len([r for r in detected_rels if r.get("confidence", 0) >= 0.9])
+            low_conf = len(detected_rels) - high_conf
+            msg = f"Auto-detected {len(detected_rels)} relationship(s): {high_conf} high-confidence, {low_conf} need review"
+            notes.append(msg)
+            self.save_metadata(model_id, metadata)
+
+    @staticmethod
+    def _is_likely_key_column(col_name: str) -> bool:
+        """Check if a column name looks like a primary or foreign key."""
+        col_lower = col_name.lower()
+        
+        # Common key patterns
+        key_patterns = [
+            "id",            # *ID, ID*
+            "key",           # *Key, Key*
+            "code",          # *Code
+            "identifier",    # *Identifier
+        ]
+        
+        for pattern in key_patterns:
+            if pattern in col_lower:
+                return True
+        
+        return False
+
+    def _compute_relationship_confidence(self, column_name: str, table1: str, table2: str) -> float:
+        """Compute confidence score for a potential relationship. Range: 0.0 to 1.0."""
+        score = 0.7  # Base score for matching columns
+        
+        col_lower = column_name.lower()
+        t1_lower = table1.lower()
+        t2_lower = table2.lower()
+        
+        # Bonus: Column name matches one of the table names (e.g., CustomerID + Customers)
+        if col_lower.startswith(t1_lower.rstrip('s')) or col_lower.startswith(t2_lower.rstrip('s')):
+            score += 0.2
+        
+        # Penalty: Generic column names (ID, Key, Code alone are too generic)
+        generic_patterns = [r'\bid\b', r'\bkey\b', r'\bcode\b']
+        if any(re.search(pattern, col_lower) for pattern in generic_patterns):
+            if len(col_lower) <= 4:  # "ID", "Key" alone
+                score -= 0.3  # Heavily penalize
+            elif not (t1_lower in col_lower or t2_lower in col_lower):
+                score -= 0.15  # Slightly penalize
+        
+        return min(max(score, 0.0), 1.0)  # Clamp to 0-1 range
+
+    def identify_relationships(self, model_id: str) -> Dict[str, Any]:
+        """Public method to identify and return relationships for a model.
+        
+        Args:
+            model_id: The ID of the model to analyze
+            
+        Returns:
+            Dictionary with relationship details and status
+        """
+        try:
+            # Trigger relationship detection
+            self._detect_relationships(model_id)
+            
+            # Load the updated metadata with detected relationships
+            metadata = self.load_metadata(model_id)
+            
+            # Extract relationships
+            relationships = metadata.get("relationships", [])
+            notes = metadata.get("ingestion_notes", [])
+            
+            # Create summary
+            high_conf = len([r for r in relationships if r.get("confidence", 0) >= 0.9])
+            low_conf = len([r for r in relationships if r.get("confidence", 0) < 0.9])
+            
+            return {
+                "success": True,
+                "model_id": model_id,
+                "relationships": relationships,
+                "total_detected": len(relationships),
+                "high_confidence": high_conf,
+                "low_confidence": low_conf,
+                "notes": notes,
+                "message": f"Detected {len(relationships)} relationship(s): {high_conf} high-confidence, {low_conf} need review"
+            }
+        except Exception as e:
+            return {
+                "success": False,
+                "model_id": model_id,
+                "error": str(e),
+                "message": f"Error identifying relationships: {str(e)}"
+            }
+
+    def delete_model(self, model_id: str) -> bool:
+        """Delete a model and all its associated files.
+        
+        Args:
+            model_id: The ID of the model to delete
+            
+        Returns:
+            True if deleted successfully, False otherwise
+        """
+        try:
+            model = self.get_model(model_id)
+            if not model:
+                return False
+            
+            # Delete metadata file
+            metadata_path = Path(model["metadata_path"])
+            if metadata_path.exists():
+                metadata_path.unlink()
+            
+            # Delete uploads directory
+            model_upload_dir = self.uploads_root / model_id
+            if model_upload_dir.exists():
+                import shutil
+                shutil.rmtree(model_upload_dir)
+            
+            # Remove from index
+            models = self._load_index()
+            models = [m for m in models if m.get("id") != model_id]
+            self._save_index(models)
+            
+            return True
+        except Exception:
+            return False
+
+    def delete_upload(self, model_id: str, filename: str) -> bool:
+        """Delete an uploaded file from a model.
+        
+        Args:
+            model_id: The ID of the model
+            filename: The name of the file to delete
+            
+        Returns:
+            True if deleted successfully, False otherwise
+        """
+        try:
+            model = self.get_model(model_id)
+            if not model:
+                return False
+            
+            # Find and delete the file
+            uploads = list(model.get("uploads", []))
+            for upload in uploads:
+                if upload.get("filename") == filename:
+                    stored_path = Path(upload["stored_path"])
+                    if stored_path.exists():
+                        stored_path.unlink()
+                    uploads.remove(upload)
+                    break
+            
+            # Update model
+            self._upsert_model(model_id, {"uploads": uploads})
+            
+            # Reload metadata to recalculate tables
+            metadata = self.load_metadata(model_id)
+            self.save_metadata(model_id, metadata)
+            
+            return True
+        except Exception:
+            return False
+
+    def delete_relationship(self, model_id: str, relationship_name: str) -> bool:
+        """Delete a relationship from a model.
+        
+        Args:
+            model_id: The ID of the model
+            relationship_name: The name of the relationship to delete
+            
+        Returns:
+            True if deleted successfully, False otherwise
+        """
+        try:
+            metadata = self.load_metadata(model_id)
+            if not metadata:
+                return False
+            
+            relationships = metadata.get("relationships", [])
+            original_count = len(relationships)
+            
+            # Filter out the relationship
+            relationships = [r for r in relationships if r.get("name") != relationship_name]
+            
+            if len(relationships) == original_count:
+                return False  # Nothing was deleted
+            
+            metadata["relationships"] = relationships
+            notes = metadata.setdefault("ingestion_notes", [])
+            notes.append(f"User deleted relationship: {relationship_name}")
+            
+            self.save_metadata(model_id, metadata)
+            return True
+        except Exception:
+            return False

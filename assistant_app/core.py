@@ -194,20 +194,31 @@ class SemanticModelMetadata:
                 "column_count": len(columns),
             }
 
-        # Ensure minimal defaults if uploaded metadata is sparse.
-        if not normalized["tables"]:
-            normalized["tables"] = {
-                "Sales": {
-                    "columns": {
-                        "Sales": "decimal(18,2)",
-                        "OrderDate": "date",
-                        "ProductKey": "bigint",
-                    },
-                    "column_count": 3,
-                }
-            }
-
+        # FIXED: Do NOT add sample tables - if model is empty, stay empty
+        # This prevents hallucinated code generation for empty models
+        # Users will see error message: "Model is empty, please upload CSV files"
+        
         return normalized
+    
+    def is_empty(self) -> bool:
+        """Check if model has no tables. Used for validation."""
+        return len(self.metadata.get("tables", {})) == 0
+    
+    def validate_ready_for_generation(self) -> tuple[bool, str]:
+        """Validate model is ready for code generation. Returns (is_valid, message)."""
+        if self.is_empty():
+            return False, (
+                "❌ Your model is empty! Please upload CSV files first.\n\n"
+                "Steps:\n"
+                "1. Go to Model Hub tab\n"
+                "2. Upload CSV files (orders.csv, customers.csv, etc)\n"
+                "3. Click 'Store Uploaded Files'\n"
+                "4. Return to Generate tab\n"
+                "5. Generate code from your actual model data"
+            )
+        if len(self.metadata.get("tables", {})) < 1:
+            return False, "Model has no tables. Cannot generate code."
+        return True, "Model ready"
 
     def _build_metadata(self) -> None:
         if not self.loader:
@@ -445,40 +456,43 @@ class DAXGenerationEngine:
         if not clean_name:
             clean_name = f"Generated_{item_type.title()}"
 
+        table_name, value_col, date_col, label_col = self._pick_trained_schema_targets(description_l)
+
         expression = ""
-        explanation = "Generated using fallback rules (no API)."
+        explanation = "Generated using trained model profile and fallback rules (no API)."
 
         if item_type == "measure":
-            if "total" in description_l and "sale" in description_l:
-                expression = "SUM(Sales[Sales])"
-            elif "growth" in description_l and "month" in description_l:
+            if "growth" in description_l and "month" in description_l and date_col:
                 expression = (
-                    "VAR CurrentMonthSales = SUM(Sales[Sales])\n"
-                    "VAR PrevMonthSales = CALCULATE(SUM(Sales[Sales]), DATEADD(Sales[OrderDate], -1, MONTH))\n"
-                    "RETURN DIVIDE(CurrentMonthSales - PrevMonthSales, PrevMonthSales)"
+                    f"VAR CurrentValue = SUM({table_name}[{value_col}])\n"
+                    f"VAR PrevValue = CALCULATE(SUM({table_name}[{value_col}]), DATEADD({table_name}[{date_col}], -1, MONTH))\n"
+                    "RETURN DIVIDE(CurrentValue - PrevValue, PrevValue)"
                 )
-            elif "top" in description_l and "product" in description_l:
+            elif "top" in description_l:
                 expression = (
-                    "CALCULATE(SUM(Sales[Sales]), "
-                    "TOPN(5, VALUES(Product[ProductName]), [Total_Sales], DESC))"
+                    f"CALCULATE(SUM({table_name}[{value_col}]), "
+                    f"TOPN(5, VALUES({table_name}[{label_col}]), SUM({table_name}[{value_col}]), DESC))"
                 )
             else:
-                expression = "SUM(Sales[Sales])"
+                expression = f"SUM({table_name}[{value_col}])"
 
         elif item_type == "flag":
             if "1000" in description_l or "1000" in conditions:
-                expression = 'IF(SUM(Sales[Sales]) > 1000, "Yes", "No")'
+                expression = f'IF(SUM({table_name}[{value_col}]) > 1000, "Yes", "No")'
             else:
-                expression = 'IF(SUM(Sales[Sales]) > 0, "Yes", "No")'
+                expression = f'IF(SUM({table_name}[{value_col}]) > 0, "Yes", "No")'
 
         elif item_type == "column":
-            expression = 'IF(Sales[Sales] > 1000, "High", "Standard")'
+            expression = f'IF({table_name}[{value_col}] > 1000, "High", "Standard")'
 
         elif item_type == "table":
-            expression = "TOPN(5, SUMMARIZE(Sales, Product[ProductName], \"Total_Sales\", SUM(Sales[Sales])), [Total_Sales], DESC)"
+            expression = (
+                f"TOPN(5, SUMMARIZE({table_name}, {table_name}[{label_col}], "
+                f"\"Total_Value\", SUM({table_name}[{value_col}])), [Total_Value], DESC)"
+            )
 
         else:
-            expression = "SUM(Sales[Sales])"
+            expression = f"SUM({table_name}[{value_col}])"
 
         return {
             "name": clean_name[:80],
@@ -487,6 +501,104 @@ class DAXGenerationEngine:
             "validation": "fallback_ok",
             "raw_response": "fallback",
         }
+
+    def _pick_trained_schema_targets(self, description_l: str = "") -> Tuple[str, str, Optional[str], str]:
+        metadata_obj = self.context_builder.metadata.metadata
+        tables = metadata_obj.get("tables", {}) if isinstance(metadata_obj.get("tables", {}), dict) else {}
+        profile = metadata_obj.get("training_profile", {}) if isinstance(metadata_obj.get("training_profile", {}), dict) else {}
+
+        preferred_table = profile.get("preferred_table")
+        preferred_value = profile.get("preferred_value_column")
+        preferred_date = profile.get("preferred_date_column")
+
+        table_name = None
+
+        # If request hints a business entity (product/region/customer), prefer matching table.
+        for tname in tables.keys():
+            if tname.lower() in description_l:
+                table_name = tname
+                break
+
+        if table_name is None and preferred_table and preferred_table in tables:
+            table_name = preferred_table
+        elif table_name is None and tables:
+            table_name = next(iter(tables.keys()))
+        else:
+            return ("Sales", "Sales", "OrderDate", "Sales")
+
+        cols = tables.get(table_name, {}).get("columns", {})
+        if not isinstance(cols, dict) or not cols:
+            return (table_name, "value", None, "value")
+
+        value_col = self._pick_value_col(table_name, cols, preferred_value)
+        date_col = self._pick_date_col(table_name, cols, preferred_date)
+        label_col = self._pick_label_col(cols, fallback=value_col)
+        return (table_name, value_col, date_col, label_col)
+
+    @staticmethod
+    def _pick_value_col(table_name: str, cols: Dict[str, Any], preferred_value: Optional[str]) -> str:
+        if preferred_value and "." in preferred_value:
+            p_table, p_col = preferred_value.split(".", 1)
+            if p_table == table_name and p_col in cols:
+                return p_col
+
+        preferred_keywords = ["sales", "amount", "revenue", "total", "price", "value", "cost"]
+        numeric_candidates: List[str] = []
+        id_like = ["id", "key", "code", "identifier"]
+        for col, dtype in cols.items():
+            dtype_l = str(dtype).lower()
+            if any(k in dtype_l for k in ["int", "float", "double", "decimal", "numeric", "bigint"]):
+                low_col = col.lower()
+                # Avoid using identifier columns as business value measures.
+                if not any(k in low_col for k in id_like):
+                    numeric_candidates.append(col)
+
+        for col in numeric_candidates:
+            low = col.lower()
+            if any(k in low for k in preferred_keywords):
+                return col
+
+        if numeric_candidates:
+            return numeric_candidates[0]
+
+        # Last-resort numeric fallback, even if identifier-like.
+        for col, dtype in cols.items():
+            dtype_l = str(dtype).lower()
+            if any(k in dtype_l for k in ["int", "float", "double", "decimal", "numeric", "bigint"]):
+                return col
+        return next(iter(cols.keys()))
+
+    @staticmethod
+    def _pick_date_col(table_name: str, cols: Dict[str, Any], preferred_date: Optional[str]) -> Optional[str]:
+        if preferred_date and "." in preferred_date:
+            p_table, p_col = preferred_date.split(".", 1)
+            if p_table == table_name and p_col in cols:
+                return p_col
+
+        for col, dtype in cols.items():
+            low_col = col.lower()
+            dtype_l = str(dtype).lower()
+            if any(k in dtype_l for k in ["date", "timestamp", "datetime"]) or any(
+                k in low_col for k in ["date", "month", "year"]
+            ):
+                return col
+        return None
+
+    @staticmethod
+    def _pick_label_col(cols: Dict[str, Any], fallback: str) -> str:
+        id_like = ["id", "key", "code", "identifier"]
+        for col, dtype in cols.items():
+            low = col.lower()
+            if any(k in low for k in ["name", "title", "category", "segment", "type", "product"]):
+                return col
+            if "string" in str(dtype).lower() and not any(k in low for k in id_like):
+                return col
+
+        for col in cols.keys():
+            low = col.lower()
+            if col != fallback and not any(k in low for k in id_like):
+                return col
+        return fallback
 
 
 class ValidationEngine:
@@ -514,6 +626,13 @@ class ValidationEngine:
                 issues.append(f"Table not found: {table_name}")
             elif not self.metadata.check_column_exists(table_name, col_name):
                 issues.append(f"Column not found: {table_name}[{col_name}]")
+
+        # Guardrail: avoid SUM/AVERAGE over identifier-like columns (EmployeeID, ProductKey, etc.)
+        agg_refs = re.findall(r"(SUM|AVERAGE)\s*\(\s*(\w+)\[(\w+)\]\s*\)", expression, flags=re.I)
+        for fn, table_name, col_name in agg_refs:
+            low = col_name.lower()
+            if any(k in low for k in ["id", "key", "code", "identifier"]):
+                issues.append(f"{fn.upper()} on identifier-like column is likely wrong: {table_name}[{col_name}]")
 
         return len(issues) == 0, issues
 
@@ -763,6 +882,24 @@ class PowerBIAssistantAgent:
         conditions: str = "",
         auto_register: bool = False,
     ) -> Dict[str, Any]:
+        # FIXED: Validate model is not empty before generating code
+        is_valid, validation_msg = self.metadata.validate_ready_for_generation()
+        if not is_valid:
+            return {
+                "name": f"Error_{item_type.title()}",
+                "item_type": item_type,
+                "description": description,
+                "expression": "",
+                "paste_ready_query": "",
+                "explanation": validation_msg,
+                "validation_ok": False,
+                "validation_errors": [validation_msg],
+                "is_duplicate": False,
+                "similar_candidates": [],
+                "tips": ["Upload CSV files to your model first"],
+                "generated_at": datetime.now().isoformat(),
+            }
+        
         similar = self.registry.find_similar(description)
         draft = self.generator.generate(item_type=item_type, description=description, conditions=conditions)
 
@@ -782,6 +919,7 @@ class PowerBIAssistantAgent:
 
         explanation = draft.get("explanation") or self.explainer.explain(expression)
         tips = self.explainer.suggestions(expression)
+        paste_ready_query = self._build_paste_ready_query(name=name, item_type=item_type, expression=expression)
 
         return {
             "name": name,
@@ -789,6 +927,7 @@ class PowerBIAssistantAgent:
             "description": description,
             "conditions": conditions,
             "expression": expression,
+            "paste_ready_query": paste_ready_query,
             "explanation": explanation,
             "validation_ok": valid,
             "validation_errors": validation_errors,
@@ -797,6 +936,13 @@ class PowerBIAssistantAgent:
             "tips": tips,
             "generated_at": datetime.now().isoformat(),
         }
+
+    @staticmethod
+    def _build_paste_ready_query(name: str, item_type: str, expression: str) -> str:
+        normalized = (item_type or "measure").strip().lower()
+        if normalized in {"measure", "flag", "column", "table"}:
+            return f"{name} =\n{expression}"
+        return expression
 
     def registry_summary(self) -> str:
         return self.registry.summary()
@@ -893,6 +1039,8 @@ class PowerBIAssistantAgent:
             print("\nExpression (DAX/Spark Query):")
             print("-" * 50)
             print(result["expression"])
+            print("\nPaste-ready:")
+            print(result.get("paste_ready_query", result["expression"]))
             print("Explanation:")
             print(result["explanation"])
             print("-" * 50)

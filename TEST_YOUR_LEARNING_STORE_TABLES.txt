@@ -1,0 +1,328 @@
+================================================================================
+TEST SCENARIO - Your Learning Store Tables
+================================================================================
+
+TABLES IN YOUR SYSTEM:
+1. Sales (13 columns)
+2. SalesPerson (5 columns)
+3. Targets (6 columns)
+4. SalesPersonRegion (2 columns)
+5. Region (4 columns)
+6. Product (8 columns)
+
+================================================================================
+EXPECTED RELATIONSHIPS TO DETECT
+================================================================================
+
+RELATIONSHIP 1: SalesPerson -> Sales
+  - Source: SalesPerson.EmployeeID or SalesPerson.ID
+  - Target: Sales.EmployeeID or Sales.SalesPersonID
+  - Type: 1-to-Many (1 salesperson can have multiple sales)
+  - Expected Confidence: Very High (95-100%)
+  - Test: Create combined table of SalesPerson + Sales
+
+RELATIONSHIP 2: Product -> Sales
+  - Source: Product.ProductID or Product.ID
+  - Target: Sales.ProductID
+  - Type: 1-to-Many (1 product can be sold multiple times)
+  - Expected Confidence: Very High (95-100%)
+  - Test: Create combined table of Product + Sales
+
+RELATIONSHIP 3: Region -> SalesPerson
+  - Source: Region.RegionID or Region.ID
+  - Target: SalesPerson.RegionID or via SalesPersonRegion table
+  - Type: 1-to-Many (1 region has multiple salespeople)
+  - Expected Confidence: High (85-95%)
+  - Test: Create combined table of Region + SalesPerson
+
+RELATIONSHIP 4: Targets -> SalesPerson
+  - Source: SalesPerson.EmployeeID or SalesPerson.ID
+  - Target: Targets.EmployeeID or Targets.SalesPersonID
+  - Type: 1-to-1 or 1-to-Many (each salesperson has sales targets)
+  - Expected Confidence: High (85-95%)
+  - Test: Create combined table of SalesPerson + Targets
+
+RELATIONSHIP 5: SalesPersonRegion (Bridge Table)
+  - Source: SalesPersonRegion has both EmployeeID/SalesPersonID and RegionID
+  - Multiple possibilities for relationship detection
+  - Type: Many-to-Many connector
+  - Expected Confidence: Medium (70-85%)
+  - Test: Detect relationships from this bridge table
+
+
+================================================================================
+TEST PLAN A: Basic 1-to-Many Relationships
+================================================================================
+
+TEST 1: SalesPerson + Sales Combination
+────────────────────────────────────────
+Step 1: Ensure both tables are uploaded
+   - Check: SalesPerson appears in table list with 5 columns
+   - Check: Sales appears in table list with 13 columns
+   Status: ☐ Pass / ☐ Fail
+
+Step 2: Click "Identify Relationships" button
+   Expected:
+   - Agent detects SalesPerson.EmployeeID ↔ Sales.SalesPersonID relationship
+   - OR detects SalesPerson.ID ↔ Sales.SalesPersonID relationship
+   - Confidence score: 95%+
+   - Relationship shows as "1-to-Many"
+   Status: ☐ Pass / ☐ Fail
+
+Step 3: Create Combined Table
+   Action: Click "Create Combined Table" for SalesPerson + Sales relationship
+   Expected Output:
+   - New model created: "SalesPerson_Sales" or similar
+   - Combined table contains:
+     * SalesPerson columns: EmployeeID/ID, Name, Title, Region info
+     * Sales columns: SalesAmount, OrderDate, Quantity, ProductID, etc.
+   - Row count equals total number of sales records
+   Status: ☐ Pass / ☐ Fail
+
+Step 4: Validate Data Quality
+   Expected:
+   - No NULL values in join keys (EmployeeID/SalesPersonID)
+   - All salespeople who have sales are represented
+   - Each sales record is matched to correct salesperson
+   - No duplicate rows
+   Status: ☐ Pass / ☐ Fail
+
+
+TEST 2: Product + Sales Combination
+────────────────────────────────────
+Step 1: Upload check
+   - Check: Product table appears (8 columns)
+   - Check: Sales table available
+   Status: ☐ Pass / ☐ Fail
+
+Step 2: Identify Relationships
+   Expected:
+   - Agent detects Product.ProductID ↔ Sales.ProductID
+   - Confidence: 95%+
+   - Type: 1-to-Many
+   Status: ☐ Pass / ☐ Fail
+
+Step 3: Create Combined Table
+   Expected:
+   - Combined table: "Product_Sales"
+   - Columns include: ProductID, ProductName, Category, Sales details
+   - Each product appears multiple times (once per sale)
+   Status: ☐ Pass / ☐ Fail
+
+
+TEST 3: Region + SalesPerson Combination
+──────────────────────────────────────────
+Step 1: Check uploads
+   - Region table: 4 columns
+   - SalesPerson table: 5 columns
+   Status: ☐ Pass / ☐ Fail
+
+Step 2: Identify Relationships
+   Expected:
+   - Agent detects Region.RegionID ↔ SalesPerson.RegionID
+   - OR detects via SalesPersonRegion bridge table
+   - Confidence: 85%+
+   Status: ☐ Pass / ☐ Fail
+
+Step 3: Create Combined Table
+   Expected:
+   - Combined table shows which salespeople work in which regions
+   - All regions with assigned salespeople are included
+   Status: ☐ Pass / ☐ Fail
+
+
+================================================================================
+TEST PLAN B: Complex Relationships & Chaining
+================================================================================
+
+TEST 4: Multi-Table Combination (Advanced)
+───────────────────────────────────────────
+Objective: Test if agent can handle suggestions for multiple relationships
+
+Step 1: Create SalesPerson + Sales
+   - Follow TEST 1 steps above
+   Status: ☐ Pass / ☐ Fail
+
+Step 2: Then add Region through SalesPerson
+   - Edit relationship to include Region info
+   - Expected: Combined table shows Salesperson + Sales + Region details
+   Status: ☐ Pass / ☐ Fail
+
+Step 3: Then add Product through Sales
+   - Edit to include Product info
+   - Expected: Full view of Sales with all details (person, region, product)
+   Status: ☐ Pass / ☐ Fail
+
+
+TEST 5: Bridge Table Detection (SalesPersonRegion)
+────────────────────────────────────────────────────
+Step 1: Check SalesPersonRegion structure
+   - Columns: Likely EmployeeID + RegionID (or SalesPersonID + RegionID)
+   - Purpose: Maps salespeople to regions (many-to-many)
+   Status: ☐ Pass / ☐ Fail
+
+Step 2: Identify Relationships from this table
+   Expected:
+   - Agent detects relationships to both SalesPerson and Region
+   - Suggests this is a bridge/junction table
+   - Confidence: 70-85%
+   Status: ☐ Pass / ☐ Fail
+
+
+================================================================================
+TEST PLAN C: Edge Cases & Error Handling
+================================================================================
+
+TEST 6: Missing Join Keys
+──────────────────────────
+Scenario: What if some sales records have no matching SalesPerson?
+
+Expected Behavior:
+☐ Agent still creates combined table (LEFT JOIN)
+☐ Shows which sales records have missing salespeople
+☐ Displays NULL or "No Match" for orphaned records
+Status: ☐ Pass / ☐ Fail
+
+
+TEST 7: Data Type Mismatches
+────────────────────────────
+Scenario: EmployeeID is numeric in SalesPerson but text in Sales
+
+Expected Behavior:
+☐ Agent detects type mismatch
+☐ Attempts automatic conversion (numeric ↔ text)
+☐ Shows confidence level (may be lower due to type issues)
+☐ Either converts or suggests manual fix
+Status: ☐ Pass / ☐ Fail
+
+
+TEST 8: Edit & Delete Operations
+─────────────────────────────────
+Test Edit:
+Step 1: Create a combined table (e.g., SalesPerson + Sales)
+Step 2: Click Edit button on the relationship
+Step 3: Change source or target columns
+Step 4: Save changes
+Expected: 
+- ☐ Relationship updates
+- ☐ Combined table regenerates with new mapping
+- ☐ No errors in process
+
+Test Delete:
+Step 1: Create a combined table
+Step 2: Click Delete (trash icon) button
+Step 3: Confirm deletion
+Expected:
+- ☐ Combined table removed from list
+- ☐ Original tables remain intact
+- ☐ Clean removal (no orphaned data)
+
+
+================================================================================
+VALIDATION MATRIX
+================================================================================
+
+                           PASS  FAIL  NOTES
+Relationship Detection:
+☐ SalesPerson + Sales      [ ]   [ ]   _________
+☐ Product + Sales          [ ]   [ ]   _________
+☐ Region + SalesPerson     [ ]   [ ]   _________
+☐ Targets + SalesPerson    [ ]   [ ]   _________
+☐ SalesPersonRegion detect [ ]   [ ]   _________
+
+Combined Table Creation:
+☐ Row count correct        [ ]   [ ]   _________
+☐ Column mapping right     [ ]   [ ]   _________
+☐ No duplicate rows        [ ]   [ ]   _________
+☐ Data integrity intact    [ ]   [ ]   _________
+
+Edit/Delete Functions:
+☐ Edit relationship works  [ ]   [ ]   _________
+☐ Delete removes table     [ ]   [ ]   _________
+☐ No orphaned data         [ ]   [ ]   _________
+☐ No console errors        [ ]   [ ]   _________
+
+Data Quality:
+☐ No unexpected NULLs      [ ]   [ ]   _________
+☐ Data types consistent    [ ]   [ ]   _________
+☐ Relationships valid      [ ]   [ ]   _________
+☐ Join counts accurate     [ ]   [ ]   _________
+
+
+================================================================================
+QUICK TEST CHECKLIST
+================================================================================
+
+⚡ FASTEST WAY TO TEST (5 minutes):
+
+1. ☐ Click "Identify Relationships" 
+   → System detects 3+ relationships automatically?
+   → Confidence scores displayed?
+
+2. ☐ Create 1 combined table (SalesPerson + Sales)
+   → No errors?
+   → Shows correct number of rows?
+   → All columns present?
+
+3. ☐ Test edit button
+   → Opens editor without errors?
+   → Changes save?
+
+4. ☐ Test delete button
+   → Removes table cleanly?
+   → Original tables still exist?
+
+RESULT: If all 4 checks ✓ → Agent is working correctly!
+
+
+================================================================================
+WHAT TO CHECK IF TESTS FAIL
+================================================================================
+
+Issue: Relationships not detected
+→ Check: Are column names exactly matching? (case-sensitive)
+→ Check: Do join key columns have same data type?
+→ Check: Are there any NULL values in join keys?
+→ Check: Open browser console (F12) for error logs
+
+Issue: Wrong row count in combined table
+→ Check: Are you using INNER join (only matches) or LEFT join (all from left)?
+→ Check: Are there duplicate values in join keys?
+→ Check: Count the expected matches manually
+
+Issue: Edit/Delete not working
+→ Check: Any console errors?
+→ Check: Refresh browser and try again
+→ Check: Verify files haven't been deleted
+
+Issue: Data type mismatch
+→ Check: One table has numeric IDs, other has text?
+→ Try: Manually fix by converting one to match the other
+→ Or: Update your CSV files before uploading
+
+
+================================================================================
+BONUS: Advanced Validation Queries
+================================================================================
+
+After creating combined tables, validate with these mental checks:
+
+✓ SalesPerson + Sales:
+  Count of rows = Total number of individual sales records
+  Verify: Top salesperson appears multiple times? (expected)
+  Verify: Total sales amount matches original Sales table? (expected)
+
+✓ Product + Sales:
+  Count of rows = Total number of individual sales records
+  Verify: Popular products appear multiple times? (expected)
+  Verify: All products have at least 1 sale? (or check for orphans)
+
+✓ Region + SalesPerson:
+  Count of rows = Total number of salespeople
+  Verify: Regions with multiple salespeople? (expected)
+
+✓ SalesPerson + Targets:
+  Count of rows = Number of salesperson + target combinations
+  Verify: Each salesperson has exactly 1 target? (or multiple?)
+
+================================================================================

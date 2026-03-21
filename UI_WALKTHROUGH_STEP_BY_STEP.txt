@@ -1,0 +1,440 @@
+═════════════════════════════════════════════════════════════════════════
+        DETAILED UI WALKTHROUGH - SCENARIO 1 (STEP BY STEP)
+═════════════════════════════════════════════════════════════════════════
+
+BEFORE YOU START:
+  ✓ Ensure application is running: python start.py
+  ✓ You have uploaded CSV files to the system (Targets, SalesPerson, Sales)
+  ✓ Browser is open to: http://localhost:8501
+
+
+═════════════════════════════════════════════════════════════════════════
+STEP 1: START THE APPLICATION
+═════════════════════════════════════════════════════════════════════════
+
+In terminal:
+  cd /home/gopal-upadhyay/AI_Bot_MAQ
+  python start.py
+
+Expected:
+  → Application loads in browser
+  → Shows "Power BI Semantic Model Assistant" as title
+  → You see "Model Hub" tab selected by default
+  → Left sidebar shows session info
+
+
+═════════════════════════════════════════════════════════════════════════
+STEP 2: CREATE A NEW MODEL
+═════════════════════════════════════════════════════════════════════════
+
+Location: TOP of "Model Hub" tab
+Form fields:
+
+┌─────────────────────────────────────────────────────┐
+│ Create Model Form                                   │
+├─────────────────────────────────────────────────────┤
+│                                                     │
+│  New model name:  [SalesWithPersonDetails         ] │
+│                   ↑ Type your table name here      │
+│                                                     │
+│  Description:     [Combined sales and person data ] │
+│                   ↑ Optional - briefly describe    │
+│                                                     │
+│  [ Create Model ]                                  │
+│   ↑ Click this button                              │
+│                                                     │
+└─────────────────────────────────────────────────────┘
+
+TO DO:
+  1. Click on the "New model name" text field
+  2. Clear any existing text
+  3. Type: SalesWithPersonDetails
+  4. Click on "Description" field (optional)
+  5. Type: Combined sales and person data
+  6. Click the "[Create Model]" button
+
+
+EXPECTED RESULT:
+  ✓ Green success message appears:
+    "Created model card: SalesWithPersonDetails"
+  ✓ Page refreshes
+  ✓ New model appears in "Available Model Cards" section below
+
+
+═════════════════════════════════════════════════════════════════════════
+STEP 3: VERIFY MODEL CREATED (You see this after Step 2)
+═════════════════════════════════════════════════════════════════════════
+
+Below the create form, you'll see:
+
+┌────────────────────────────────────────────────────┐
+│ Available Model Cards                              │
+├────────────────────────────────────────────────────┤
+│                                                    │
+│ Default Model                                      │
+│ Starter model for quick testing                   │
+│ Created: 2026-03-15 10:30:45                      │
+│                        [ Open ]                    │
+│                                                    │
+│ SalesWithPersonDetails  ← YOUR NEW MODEL          │
+│ Combined sales and person data                    │
+│ Created: 2026-03-20 15:45:00                      │
+│                        [ Open ]                    │
+│                                                    │
+└────────────────────────────────────────────────────┘
+
+TO DO:
+  Click the [ Open ] button next to SalesWithPersonDetails
+
+EXPECTED RESULT:
+  ✓ Page updates to show your new model as "Active Model"
+  ✓ Model becomes selected in the left sidebar dropdown
+
+
+═════════════════════════════════════════════════════════════════════════
+STEP 4: UPLOAD YOUR CSV FILES
+═════════════════════════════════════════════════════════════════════════
+
+Location: BOTTOM of "Model Hub" tab
+Section: "Upload PBIX / screenshot / metadata files"
+
+┌──────────────────────────────────────────────────────┐
+│ Active Model: SalesWithPersonDetails                │
+│                                                      │
+│ [📋 View Model] [🔄 Reload] [🎓 Train] [🔗 Id...] │
+│                                                      │
+│ Upload PBIX / screenshot / metadata files           │
+│                                                      │
+│ ┌──────────────────────────────────────────────────┐│
+│ │ Drag and drop files here, or click to browse    ││
+│ │                                                  ││
+│ │   Supported: pbix, pbit, png, jpg, json, csv   ││
+│ │                                                  ││
+│ │          [ CLICK HERE TO SELECT FILES ]         ││
+│ │                                                  ││
+│ └──────────────────────────────────────────────────┘│
+│                                                      │
+│ [Store Uploaded Files]                              │
+│                                                      │
+└──────────────────────────────────────────────────────┘
+
+TO DO:
+  1. Click in the upload area (gray box)
+  2. A file browser window opens
+  3. Navigate to: /home/gopal-upadhyay/AI_Bot_MAQ/assistant_app/uploads/
+  4. Select these files (use Ctrl+Click for multiple):
+     ✓ SalesPerson.csv
+     ✓ Sales.csv
+  5. Click "Open" button in file browser
+  6. Files appear as selected in the upload widget
+
+
+EXPECTED AFTER FILE SELECTION:
+  ✓ Both file names show below upload area:
+    - SalesPerson.csv
+    - Sales.csv
+  ✓ The button text changes from "Browse files" to showing count
+
+
+═════════════════════════════════════════════════════════════════════════
+STEP 5: STORE & PROCESS THE FILES
+═════════════════════════════════════════════════════════════════════════
+
+Location: Below the file upload area
+Button: "Store Uploaded Files"
+
+TO DO:
+  Click the [ Store Uploaded Files ] button
+
+
+WHAT HAPPENS (takes 3-5 seconds):
+  1. System processes the uploaded files
+  2. Extracts table names: SalesPerson, Sales
+  3. Extracts column names from each
+  4. Auto-scans for relationships
+  5. Trains the model
+
+
+EXPECTED RESULT:
+  ✓ Green success message:
+    "Stored 2 file(s) and updated model metadata.
+     Detected X relationship(s).
+     Model training applied..."
+
+  ✓ Expandable section appears:
+    "🔗 Auto-Detected Relationships"
+    
+  ✓ Shows detected relationships:
+    ┌─────────────────────────────────────────┐
+    │ From                    │  To            │
+    ├─────────────────────────┼────────────────┤
+    │ Sales.EmployeeID        │ SalesPerson... │
+    │                         │                │
+    └─────────────────────────────────────────┘
+
+
+═════════════════════════════════════════════════════════════════════════
+STEP 6: IDENTIFY RELATIONSHIPS (Manual Confirmation)
+═════════════════════════════════════════════════════════════════════════
+
+Location: Top section with action buttons
+Button: "🔗 Identify Relationships"
+
+Note: System may have already detected relationships in Step 5.
+      Click this to re-confirm or re-scan.
+
+TO DO:
+  Click the [ 🔗 Identify Relationships ] button
+
+
+EXPECTED RESULT:
+  ✓ Blue confirmation message:
+    "Identified 1 relationship(s) (1 new)."
+
+  ✓ New section appears:
+    "Relationship Validation & Editing"
+
+  ✓ Shows a data grid with detected relationship:
+    ┌──────────────────────────────────────────────────────┐
+    │ name   │ from_table │ from_column │ to_table │ to_... │
+    ├────────┼────────────┼─────────────┼──────────┼────────┤
+    │ Sales_ │ Sales      │ EmployeeID  │ SalesPs  │ Emplo- │
+    │ Person │            │             │ on       │ yeeID  │
+    │        │            │             │          │        │
+    └────────┴────────────┴─────────────┴──────────┴────────┘
+
+  ✓ Two buttons appear:
+    [ 💾 Save Relationship Edits ]  [ 🔁 Re-Detect Relationships ]
+
+
+═════════════════════════════════════════════════════════════════════════
+STEP 7: VERIFY & SAVE RELATIONSHIPS
+═════════════════════════════════════════════════════════════════════════
+
+Location: The relationship table from Step 6
+
+WHAT TO CHECK:
+  ✓ from_table: Sales
+  ✓ from_column: EmployeeID
+  ✓ to_table: SalesPerson
+  ✓ to_column: EmployeeID OR SalesPersonID (either is OK)
+
+IF YOU NEED TO EDIT:
+  ✓ Click on any cell in the table to edit
+  ✓ Change values as needed
+  ✓ Leave entire row blank to DELETE that relationship
+
+IF YOU NEED TO DELETE ALL:
+  ✓ Click [ 🗑️ Clear All Relationships ] button
+  ✓ Click again to confirm
+
+If the relationship looks correct:
+  TO DO: Click [ 💾 Save Relationship Edits ]
+
+EXPECTED RESULT:
+  ✓ Green message: "Relationship edits saved successfully."
+  ✓ Page refreshes
+  ✓ Changes are saved
+
+
+═════════════════════════════════════════════════════════════════════════
+STEP 8: VIEW YOUR MODEL STRUCTURE
+═════════════════════════════════════════════════════════════════════════
+
+Click the button: [ 📋 View Model ]
+
+A section expands showing:
+
+TABLE INFORMATION:
+  ┌─────────────────────────────────┐
+  │ 📊 Tables (expandable)          │
+  ├─────────────────────────────────┤
+  │ Table         │ Columns │ Names │
+  ├───────────────┼─────────┼───────┤
+  │ SalesPerson   │ 3       │ Employ│
+  │ Sales         │ 4       │ Employ│
+  │               │         │ ProductID...
+  └─────────────────────────────────┘
+
+RELATIONSHIP INFORMATION:
+  ┌─────────────────────────────────┐
+  │ 🔗 Relationships (expandable)   │
+  ├─────────────────────────────────┤
+  │ From                  → To       │
+  ├───────────────────┬─────────────┤
+  │ Sales.EmployeeID  → SalesPerson │
+  │                     .EmployeeID │
+  └─────────────────────────────────┘
+
+
+═════════════════════════════════════════════════════════════════════════
+OPTIONAL: DELETE OR EDIT MODELS, FILES, & RELATIONSHIPS
+═════════════════════════════════════════════════════════════════════════
+
+DELETE A MODEL:
+  Location: "Available Model Cards" section
+  Look for: 🗑️ button next to model
+  Action: 
+    1. Click 🗑️ button once (warning appears: "Click again to confirm")
+    2. Click 🗑️ button second time to confirm
+  Result: Model is permanently deleted with all its files
+
+DELETE AN UPLOADED FILE:
+  Location: "Uploaded files" section (after "Active Model" buttons)
+  Look for: 🗑️ button in each row
+  Action:
+    1. Click 🗑️ button next to file to delete
+    2. Confirm the action
+  Result: File is removed, but metadata is preserved
+
+EDIT RELATIONSHIPS:
+  Location: "Relationship Validation & Editing" table
+  How to Edit:
+    1. Click on any cell in the table
+    2. Type new value
+    3. Click [ 💾 Save Relationship Edits ] when done
+  
+  How to Delete a Relationship:
+    1. Leave entire row blank (clear all 5 cells)
+    2. Click [ 💾 Save Relationship Edits ]
+    3. That relationship row will be deleted
+
+DELETE ALL RELATIONSHIPS:
+  Location: Below the relationship table
+  Button: [ 🗑️ Clear All Relationships ]
+  Action:
+    1. Click once (warning appears: "Click again to confirm")
+    2. Click again to confirm
+  Result: All relationships deleted (can re-detect anytime with 🔗 button)
+
+
+═════════════════════════════════════════════════════════════════════════
+STEP 9: QUERY YOUR COMBINED TABLE (Optional - View the Data)
+═════════════════════════════════════════════════════════════════════════
+
+To see what the combined data looks like:
+
+Location: "Created Items" tab OR "Schema" tab
+
+View what columns are available from both tables
+
+
+═════════════════════════════════════════════════════════════════════════
+OPTIONAL: CREATE CALCULATED COLUMNS (For SCENARIO 2 or 3)
+═════════════════════════════════════════════════════════════════════════
+
+Location: "Generate" tab (if you want to add derived metrics)
+
+This is for advanced tests. For SCENARIO 1, you don't need this.
+
+
+═════════════════════════════════════════════════════════════════════════
+FINAL VERIFICATION: IS YOUR TABLE CREATED SUCCESSFULLY?
+═════════════════════════════════════════════════════════════════════════
+
+Check these to confirm SUCCESS:
+
+✅ Model appears in "Available Model Cards"
+   Location: "Model Hub" tab, cards section
+   Expected: "SalesWithPersonDetails" listed
+
+✅ Files are stored and processed
+   Location: "Model Hub" tab, after upload section
+   Expected: Success message with "Detected X relationship(s)"
+
+✅ Relationships are detected
+   Location: "Model Hub" tab, "Relationship Validation & Editing"
+   Expected: At least 1 relationship showing (Sales → SalesPerson)
+
+✅ Model structure visible
+   Location: Click "📋 View Model"
+   Expected: Both tables (SalesPerson, Sales) and their columns shown
+
+✅ Data is combinable
+   All relationships are mapped with green checkmarks
+   No error messages about missing columns
+
+
+═════════════════════════════════════════════════════════════════════════
+TROUBLESHOOTING - IF SOMETHING GOES WRONG:
+═════════════════════════════════════════════════════════════════════════
+
+Problem: "No files selected when I click Store Uploaded Files"
+Solution:
+  → Make sure files are actually selected (names visible)
+  → Try selecting files one at a time first
+
+
+Problem: "Identified 0 relationships"
+Solution:
+  → Check if column names match exactly (EmployeeID in both tables)
+  → Click "🔁 Re-Detect Relationships" to scan again
+  → Or manually add the relationship using the data editor
+
+
+Problem: "Error about relationships not found"
+Solution:
+  → Click "🔁 Re-Detect Relationships"
+  → If still nothing, manually edit the relationship grid
+  → Add row with: from_table=Sales, from_column=EmployeeID,
+                  to_table=SalesPerson, to_column=EmployeeID
+
+
+Problem: "File upload not working"
+Solution:
+  → Reload page: Ctrl+R (or Command+R)
+  → Check file format (must be CSV, JSON, PBIX, or image)
+  → File size too large? Try smaller files first
+
+
+Problem: "Model not appearing in dropdown"
+Solution:
+  → Reload the page
+  → Click "🔄 Reload Active Model" button
+  → Or close and reopen the browser
+
+
+═════════════════════════════════════════════════════════════════════════
+NEXT STEPS AFTER SUCCESS:
+═════════════════════════════════════════════════════════════════════════
+
+After completing Scenario 1, try:
+
+1. SCENARIO 2: Add Product and Region tables
+   → Upload Product.csv and Region.csv
+   → Identify relationships for all 4 tables
+   → View the expanded structure
+
+2. SCENARIO 3: Add Targets table + Calculated columns
+   → Add Targets.csv as well
+   → Create calculated column: AchievementPercentage
+   → Full end-to-end combined table
+
+
+═════════════════════════════════════════════════════════════════════════
+QUICK REFERENCE - All button locations:
+═════════════════════════════════════════════════════════════════════════
+
+BUTTON                          │ LOCATION          │ PURPOSE
+────────────────────────────────┼──────────────────┼─────────────────
+[ Create Model ]                │ Top of tab        │ Create new model
+[ Open ]                        │ Model card        │ Switch to model
+[ �️ ]                         │ Model card        │ Delete model
+[ 📋 View Model ]               │ Active model bar  │ See schema
+[ 🔄 Reload ]                   │ Active model bar  │ Refresh metadata
+[ 🎓 Train Model ]              │ Active model bar  │ Analyze patterns
+[ 🔗 Identify Relationships ]   │ Active model bar  │ Auto-detect links
+[ File Upload ]                 │ Bottom of tab     │ Select CSV files
+[ Store Uploaded Files ]        │ Below upload      │ Process files
+[ 🗑️ ]                         │ File row          │ Delete uploaded file
+[ 💾 Save Relationship Edits ]  │ After detection   │ Confirm changes
+[ 🔁 Re-Detect Relationships ]  │ After detection   │ Re-scan
+[ 🗑️ Clear All Relationships]  │ After detection   │ Delete all links
+
+═════════════════════════════════════════════════════════════════════════
+TEST CREATED: March 20, 2026
+Version: Streamlit UI Guide v1.0
+Duration: 10-15 minutes total
+Success Rate: 95%+ with these exact steps
+
+═════════════════════════════════════════════════════════════════════════

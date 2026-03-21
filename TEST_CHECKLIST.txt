@@ -1,0 +1,327 @@
+═════════════════════════════════════════════════════════════════════════
+            QUICK CHECKLIST - FOLLOW ALONG WHILE TESTING
+═════════════════════════════════════════════════════════════════════════
+
+Use this checklist as you go through the UI testing.
+Check off each item as you complete it.
+
+
+PHASE 1: SETUP
+═════════════════════════════════════════════════════════════════════════
+
+□ Step 1: Start Application
+  Command: cd /home/gopal-upadhyay/AI_Bot_MAQ && streamlit run run_ui.py
+  Wait for: "You can now view your Streamlit app in your browser"
+  Open: http://localhost:8501
+
+
+□ Step 2: See Main Page Loaded
+  Look for:
+  ✓ Title: "Power BI Semantic Model Assistant"
+  ✓ Main section: "Model Hub"
+  ✓ Left sidebar with session settings
+  ✓ Default model in dropdown
+
+
+PHASE 2: CREATE NEW TABLE MODEL
+═════════════════════════════════════════════════════════════════════════
+
+□ Step 3: Fill Create Model Form
+  
+  ┌─ In the form at the top ──────────────────┐
+  │                                           │
+  │ New model name:  [ SalesWithPersonDetails]│
+  │ Description:     [ Sales person combined ]│
+  │                                           │
+  │ Click: [ Create Model ]                  │
+  │                                           │
+  └───────────────────────────────────────────┴─ Check when done: □
+
+
+□ Step 4: See Success Message
+  Expected: Green message "Created model card: SalesWithPersonDetails"
+  Action: Look for this message
+  Check when done: □
+
+
+□ Step 5: Open Your New Model
+  Look for: "Available Model Cards" section
+  Find: "SalesWithPersonDetails"
+  Click: [ Open ] button next to it
+  Expected: Active model changes to "SalesWithPersonDetails"
+  Check when done: □
+
+
+PHASE 3: UPLOAD YOUR DATA FILES
+═════════════════════════════════════════════════════════════════════════
+
+□ Step 6: Select CSV Files in Upload Widget
+  Scroll: To bottom of "Model Hub" tab
+  Look for: "Upload PBIX / screenshot / metadata files" section
+  
+  Action:
+    1. Click gray upload area (says "Drag and drop...")
+    2. Browse to: /home/gopal-upadhyay/AI_Bot_MAQ/assistant_app/uploads/
+    3. SELECT these files (hold Ctrl and click each):
+       ✓ SalesPerson.csv
+       ✓ Sales.csv
+    4. Click "Open" in file browser
+  
+  Expected: File names appear in upload widget
+  Check when done: □
+
+
+□ Step 7: Click "Store Uploaded Files" Button
+  
+  Action: Click the blue [ Store Uploaded Files ] button
+  Wait: 3-5 seconds for processing
+  Expected success indicators:
+    ✓ Green success message appears
+    ✓ Message says "Stored 2 file(s)..."
+    ✓ Message mentions "Detected X relationship(s)"
+  
+  Check when done: □
+
+
+PHASE 4: AUTO-DETECT AND VALIDATE RELATIONSHIPS
+═════════════════════════════════════════════════════════════════════════
+
+□ Step 8: Click "Identify Relationships" Button
+  
+  Location: Top buttons in "Active Model" section
+  Button: 🔗 Identify Relationships
+  Action: Click it
+  Wait: 2-3 seconds
+  Expected: Blue message "Identified 1 relationship(s) (1 new)."
+  
+  Check when done: □
+
+
+□ Step 9: See Relationship Validation Window
+  
+  Expected to see:
+    Title: "Relationship Validation & Editing"
+    Subtitle: "Review detected relationships..."
+    
+  Table with columns:
+    | name | from_table | from_column | to_table | to_column |
+    | ──── | ────────── | ─────────── | ──────── | ─────────|
+    | (auto-generated name) | Sales | EmployeeID | SalesPerson | EmployeeID |
+  
+  Check when done: □
+
+
+□ Step 10: Verify Relationship Details
+  
+  Check each field:
+  ✓ name: (auto-generated, ok if blank)
+  ✓ from_table: Should be "Sales"
+  ✓ from_column: Should be "EmployeeID"
+  ✓ to_table: Should be "SalesPerson"
+  ✓ to_column: Should be "EmployeeID" or "SalesPersonID"
+  
+  If any field is wrong, click and edit in the table
+  
+  Check when done: □
+
+
+□ Step 11: Save Relationships
+  
+  Action: Click [ 💾 Save Relationship Edits ] button
+  Wait: 1-2 seconds
+  Expected: Green message "Relationship edits saved successfully."
+  
+  Check when done: □
+
+
+PHASE 5: VERIFY YOUR MODEL STRUCTURE
+═════════════════════════════════════════════════════════════════════════
+
+□ Step 12: Click "View Model" to See Schema
+  
+  Location: Top buttons in "Active Model" section
+  Button: 📋 View Model
+  Expected: Two expandable sections appear:
+    - 📊 Tables (with SalesPerson and Sales)
+    - 🔗 Relationships (showing the 1 relationship you just created)
+  
+  Check when done: □
+
+
+□ Step 13: Expand "Tables" Section
+  
+  Click: On "📊 Tables" to expand
+  Expected to see table like:
+  
+    | Table      | Columns | Column Names                |
+    |────────────|─────────|─────────────────────────────│
+    |SalesPerson | 3       | EmployeeID, Name, RegionID |
+    | Sales      | 4       | EmployeeID, ProductID,...  |
+  
+  Check when done: □
+
+
+□ Step 14: Expand "Relationships" Section
+  
+  Click: On "🔗 Relationships" to expand
+  Expected to see:
+  
+    | From                  | To                      |
+    |──────────────────────|─────────────────────────│
+    |Sales.EmployeeID      | SalesPerson.EmployeeID |
+  
+  Check when done: □
+
+
+PHASE 6: SUCCESS VERIFICATION
+═════════════════════════════════════════════════════════════════════════
+
+✅ FINAL CHECK - Verify ALL of these
+
+Essential checks (ALL must be TRUE):
+
+□ Model "SalesWithPersonDetails" is created and visible
+  Location: "Model Hub" tab → "Available Model Cards"
+  ✓ Model name appears in list
+  ✓ Model can be opened/selected
+
+□ Both CSV files are stored
+  Location: Success message after "Store Uploaded Files"
+  ✓ Message says "Stored 2 file(s)..."
+
+□ 1 Relationship is detected
+  Location: After clicking "Identify Relationships"
+  ✓ Message says "Identified 1 relationship(s)"
+  ✓ Relationship table shows 1 row
+
+□ Relationship is correctly mapped
+  Location: Relationship Validation table
+  ✓ from_table = Sales
+  ✓ from_column = EmployeeID
+  ✓ to_table = SalesPerson
+  ✓ to_column = EmployeeID
+
+□ Relationship is saved
+  Location: After clicking "Save Relationship Edits"
+  ✓ Green message appears
+  ✓ No error messages
+
+□ Schema is viewable
+  Location: Click "📋 View Model"
+  ✓ Tables section expands
+  ✓ Shows both SalesPerson and Sales
+  ✓ Relationships section expands
+  ✓ Shows the Sales→SalesPerson link
+
+
+═════════════════════════════════════════════════════════════════════════
+SCORING YOUR TEST:
+═════════════════════════════════════════════════════════════════════════
+
+Count your checked boxes:
+
+14-14 checks: ✅ PERFECT - Combined table created successfully!
+12-13 checks: ✅ GOOD - Minor issues but functional
+10-11 checks: ⚠️  PARTIAL - Some missing features
+<10 checks:   ❌ INCOMPLETE - Review troubleshooting guide
+
+
+═════════════════════════════════════════════════════════════════════════
+WHAT YOU'VE TESTED:
+═════════════════════════════════════════════════════════════════════════
+
+If all 14 boxes are checked, you have successfully verified:
+
+✓ Table Model Creation - Can create new data models
+✓ File Upload - Can upload CSV files to models
+✓ Auto Processing - Files are automatically processed
+✓ Relationship Detection - Can auto-detect relationships
+✓ Relationship Validation - Can review relationships
+✓ Relationship Saving - Can save confirmed relationships
+✓ Schema Viewing - Can see complete table structure
+✓ Data Mapping - Can see how data is mapped between tables
+
+
+═════════════════════════════════════════════════════════════════════════
+COMMON ISSUES & QUICK FIXES:
+═════════════════════════════════════════════════════════════════════════
+
+Issue: At Step 7, files not appearing in upload widget
+Fix:
+  □ Close file browser and try again
+  □ Make sure files are .csv format
+  □ Check file names: SalesPerson.csv, Sales.csv (exact names)
+  □ Browser cache - Ctrl+Shift+Delete to clear cache
+
+
+Issue: At Step 8, "Identified 0 relationships"
+Fix:
+  □ Check if EmployeeID column exists in BOTH files
+  □ Click "🔁 Re-Detect Relationships" to try again
+  □ Manually create relationship if auto-detect fails
+     → Add row in table: from_table=Sales, from_column=EmployeeID,
+       to_table=SalesPerson, to_column=EmployeeID
+
+
+Issue: At Step 11, Error when saving relationships
+Fix:
+  □ Make sure all 4 fields are filled in:
+     - from_table
+     - from_column
+     - to_table
+     - to_column
+  □ No empty cells allowed
+  □ Try re-entering data
+
+
+Issue: Model not appearing after creation
+Fix:
+  □ Scroll down to see "Available Model Cards"
+  □ Click browser refresh button (Ctrl+R)
+  □ Or click "🔄 Reload Active Model" button
+
+
+═════════════════════════════════════════════════════════════════════════
+NEXT AFTER THIS TEST:
+═════════════════════════════════════════════════════════════════════════
+
+After completing this checklist successfully, try:
+
+SCENARIO 2 (Medium Difficulty):
+  □ Create new model: "SalesWithProducts"
+  □ Upload: SalesPerson.csv + Sales.csv + Product.csv
+  □ Identify relationships (should find 2)
+  □ Scroll through all detected relationships
+
+
+SCENARIO 3 (Full Difficulty):
+  □ Create new model: "SalesPerformanceAnalysis"
+  □ Upload ALL 5 files
+  □ Identify relationships (should find 4)
+  □ Try creating calculated columns
+
+
+═════════════════════════════════════════════════════════════════════════
+TEST NOTES:
+═════════════════════════════════════════════════════════════════════════
+
+Test Date: ________________
+Tester Name: ________________
+Browser: ________________
+Python Version: ________________
+
+Total Time Taken: ______________ minutes
+Success: YES / NO / PARTIAL
+
+Any issues encountered?
+_________________________________________________________________
+_________________________________________________________________
+_________________________________________________________________
+
+Notes:
+_________________________________________________________________
+_________________________________________________________________
+_________________________________________________________________
+
+
+═════════════════════════════════════════════════════════════════════════

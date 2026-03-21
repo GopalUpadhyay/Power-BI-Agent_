@@ -1,12 +1,26 @@
 import csv
+import json
 from pathlib import Path
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
 
 import pandas as pd
 import streamlit as st
 
 from .cli import build_agent
+from .fabric_universal import (
+    ContextBuilder,
+    DataIngestionLayer,
+    DuplicateDetectionEngine,
+    ExecutionEngine,
+    IntentDetectionEngine,
+    MetadataStore,
+    ModelDiscoveryEngine,
+    MultiLanguageGenerationEngine,
+    UniversalFabricAssistant,
+    configure_openai_client as configure_universal_client,
+)
 from .model_store import ModelStore
+from .training_engine import FabricModelTrainer
 
 
 def _items_to_dataframe(items: List[Dict[str, Any]]) -> pd.DataFrame:
@@ -76,6 +90,49 @@ def _run_field_tests(agent) -> pd.DataFrame:
     return pd.DataFrame(rows)
 
 
+def _train_active_model(model_store: ModelStore, model_id: str, agent) -> Dict[str, Any]:
+    metadata = model_store.load_metadata(model_id)
+    expressions: List[str] = []
+
+    # Learn from both existing and generated items currently in registry.
+    for item in agent.registry.items.values():
+        expr = item.get("expression", "")
+        if expr:
+            expressions.append(expr)
+
+    # Also learn from stored measures in metadata.
+    measures = metadata.get("measures", {}) if isinstance(metadata.get("measures", {}), dict) else {}
+    for measure in measures.values():
+        if isinstance(measure, dict):
+            expr = measure.get("expression", "")
+            if expr:
+                expressions.append(expr)
+
+    profile = FabricModelTrainer.train(metadata=metadata, expressions=expressions)
+    metadata["training_profile"] = profile
+    notes = metadata.setdefault("ingestion_notes", [])
+    notes.append(
+        f"Training completed at {profile.get('trained_at', '')} "
+        f"with {profile.get('observed_expression_count', 0)} expressions"
+    )
+    model_store.save_metadata(model_id, metadata)
+    return profile
+
+
+def _build_universal_assistant(api_key: str, metadata: Optional[Dict[str, Any]] = None):
+    store = MetadataStore(metadata=metadata)
+    client = configure_universal_client(api_key=api_key or None)
+    return UniversalFabricAssistant(
+        store=store,
+        ingestion=DataIngestionLayer(store),
+        discovery=ModelDiscoveryEngine(store),
+        detector=IntentDetectionEngine(),
+        generator=MultiLanguageGenerationEngine(client=client, context_builder=ContextBuilder(store.metadata)),
+        executor=ExecutionEngine(),
+        duplicate=DuplicateDetectionEngine(store),
+    )
+
+
 def run_ui() -> None:
     st.set_page_config(
         page_title="Power BI Semantic Model Assistant",
@@ -117,6 +174,18 @@ def run_ui() -> None:
             index=list(model_map.keys()).index(st.session_state.active_model_id),
         )
         force_reload = st.button("Reload Active Model")
+        st.write("---")
+        st.caption("Training Automation")
+        auto_train_active = st.checkbox(
+            "Auto-train active model on file upload",
+            value=st.session_state.get("auto_train_active", True),
+            key="auto_train_active",
+        )
+        auto_train_universal = st.checkbox(
+            "Auto-train universal model on ingest/discovery",
+            value=st.session_state.get("auto_train_universal", True),
+            key="auto_train_universal",
+        )
 
     if selected_model_id != st.session_state.active_model_id:
         st.session_state.active_model_id = selected_model_id
@@ -133,7 +202,18 @@ def run_ui() -> None:
         )
         st.session_state.agent_model_id = active_model["id"]
 
+    if (
+        "universal_assistant" not in st.session_state
+        or force_reload
+        or st.session_state.get("universal_api_key") != api_key_input
+        or st.session_state.get("universal_model_id") != active_model["id"]
+    ):
+        st.session_state.universal_assistant = _build_universal_assistant(api_key_input, metadata=active_metadata)
+        st.session_state.universal_api_key = api_key_input
+        st.session_state.universal_model_id = active_model["id"]
+
     agent = st.session_state.agent
+    universal_assistant = st.session_state.universal_assistant
 
     all_items = list(agent.registry.items.values())
     generated_items = [i for i in all_items if i.get("source") == "generated"]
@@ -144,13 +224,27 @@ def run_ui() -> None:
     col3.metric("Flags", len(agent.registry.get_items_by_type("flag")))
     col4.metric("Tables", len(agent.registry.get_items_by_type("table")))
 
-    tab_models, tab_generate, tab_items, tab_schema, tab_tests, tab_exports, tab_demo = st.tabs(
-        ["Model Hub", "Generate", "Created Items", "Schema", "Field Tests", "Exports", "Demo"]
+    tab_models, tab_generate, tab_items, tab_schema, tab_tests, tab_exports, tab_fabric, tab_demo = st.tabs(
+        [
+            "Model Hub",
+            "Generate",
+            "Created Items",
+            "Schema",
+            "Field Tests",
+            "Exports",
+            "Universal Fabric",
+            "Demo",
+        ]
     )
 
     with tab_models:
         st.subheader("Model Hub")
         st.write("Create model cards, upload metadata files, and switch to a model-specific workspace.")
+
+        if "relationship_result" not in st.session_state:
+            st.session_state.relationship_result = None
+        if "relationship_result_model_id" not in st.session_state:
+            st.session_state.relationship_result_model_id = None
 
         with st.form("create_model_form"):
             model_name = st.text_input("New model name", placeholder="Retail Sales Model")
@@ -168,7 +262,7 @@ def run_ui() -> None:
 
         st.write("### Available Model Cards")
         for model in model_store.list_models():
-            c1, c2 = st.columns([4, 1])
+            c1, c2, c3 = st.columns([3, 0.8, 0.8])
             with c1:
                 st.markdown(f"**{model['name']}**")
                 st.caption(model.get("description", ""))
@@ -177,13 +271,244 @@ def run_ui() -> None:
                 if st.button("Open", key=f"open_{model['id']}"):
                     st.session_state.active_model_id = model["id"]
                     st.rerun()
+            with c3:
+                if st.button("🗑️", key=f"delete_{model['id']}", help="Delete this model"):
+                    if st.session_state.get(f"confirm_delete_{model['id']}", False):
+                        if model_store.delete_model(model["id"]):
+                            st.success(f"Deleted model: {model['name']}")
+                            if st.session_state.active_model_id == model["id"]:
+                                st.session_state.active_model_id = None
+                            st.rerun()
+                        else:
+                            st.error("Failed to delete model")
+                    else:
+                        st.session_state[f"confirm_delete_{model['id']}"] = True
+                        st.warning(f"Click again to confirm deletion of '{model['name']}'")
+                        st.rerun()
 
         st.write("---")
         st.write(f"### Active Model: {active_model['name']}")
 
+        tc0, tc1, tc2, tc3 = st.columns([1, 1, 1, 2])
+        with tc0:
+            if st.button("📋 View Model", key="view_active_model", help="View full model schema and structure"):
+                st.session_state.show_model_view = not st.session_state.get("show_model_view", False)
+        with tc1:
+            if st.button("🔄 Reload", key="reload_active_model", help="Reload metadata from files"):
+                st.session_state.agent = _build_agent_for_model(
+                    api_key=api_key_input,
+                    metadata=model_store.load_metadata(active_model["id"]),
+                    model_id=active_model["id"],
+                )
+                st.session_state.agent_model_id = active_model["id"]
+                st.success("Model reloaded!")
+                st.rerun()
+        with tc2:
+            if st.button("🎓 Train Model", key="train_active_model"):
+                with st.spinner("Training on schema + usage patterns..."):
+                    profile = _train_active_model(model_store, active_model["id"], agent)
+                st.success("Training completed.")
+                st.json(
+                    {
+                        "preferred_table": profile.get("preferred_table"),
+                        "preferred_value_column": profile.get("preferred_value_column"),
+                        "preferred_date_column": profile.get("preferred_date_column"),
+                        "observed_expression_count": profile.get("observed_expression_count"),
+                    }
+                )
+                st.session_state.agent = _build_agent_for_model(
+                    api_key=api_key_input,
+                    metadata=model_store.load_metadata(active_model["id"]),
+                    model_id=active_model["id"],
+                )
+                st.session_state.agent_model_id = active_model["id"]
+                st.rerun()
+        with tc3:
+            if st.button("🔗 Identify Relationships", key="identify_relationships"):
+                with st.spinner("Detecting relationships..."):
+                    rel_result = model_store.identify_relationships(active_model["id"])
+                st.session_state.relationship_result = rel_result
+                st.session_state.relationship_result_model_id = active_model["id"]
+                
+                # Show immediate feedback
+                if rel_result.get("success"):
+                    st.success(f"✓ Found {rel_result.get('total_detected', 0)} relationship(s)")
+                else:
+                    st.error(f"Error: {rel_result.get('message', 'Unknown error')}")
+                
+                st.session_state.agent = _build_agent_for_model(
+                    api_key=api_key_input,
+                    metadata=model_store.load_metadata(active_model["id"]),
+                    model_id=active_model["id"],
+                )
+                st.session_state.agent_model_id = active_model["id"]
+                st.rerun()
+        with tc2:
+            tp = active_metadata.get("training_profile", {}) if isinstance(active_metadata, dict) else {}
+            if tp:
+                st.caption(
+                    "Last training profile: "
+                    f"table={tp.get('preferred_table', 'n/a')}, "
+                    f"value={tp.get('preferred_value_column', 'n/a')}, "
+                    f"date={tp.get('preferred_date_column', 'n/a')}"
+                )
+            else:
+                st.caption("No training profile yet. Click 'Train Active Model' to learn your model patterns.")
+
+        if st.session_state.get("relationship_result_model_id") == active_model["id"]:
+            rel_result = st.session_state.get("relationship_result") or {}
+            relationship_rows = rel_result.get("relationships", []) if isinstance(rel_result, dict) else []
+            
+            # Display message
+            total_count = rel_result.get("total_detected", len(relationship_rows))
+            new_count = rel_result.get("new_relationships", 0)
+            
+            if total_count > 0:
+                st.success(
+                    f"✓ Identified {total_count} relationship(s) "
+                    f"({rel_result.get('high_confidence', 0)} high-confidence)"
+                )
+            elif rel_result.get("success") is True:
+                st.info("No relationships detected. Check your data or manually add them.")
+            elif rel_result.get("success") is False:
+                st.error(f"Error: {rel_result.get('message', 'Unknown error')}")
+
+            if total_count > 0:
+                st.write("### Relationship Validation & Editing")
+                st.caption("Review detected relationships. Edit any row or delete rows (leave blank to remove). Click Save.")
+
+                edit_df = pd.DataFrame(
+                    [
+                        {
+                            "name": rel.get("name", ""),
+                            "from_table": rel.get("from_table", ""),
+                            "from_column": rel.get("from_column", ""),
+                            "to_table": rel.get("to_table", ""),
+                            "to_column": rel.get("to_column", ""),
+                        }
+                        for rel in relationship_rows
+                    ]
+                )
+
+                edited_df = st.data_editor(
+                    edit_df,
+                    use_container_width=True,
+                    num_rows="dynamic",
+                    key=f"relationship_editor_{active_model['id']}",
+                )
+
+                ec1, ec2, ec3 = st.columns([1, 1, 1])
+                with ec1:
+                    if st.button("💾 Save Relationship Edits", key=f"save_relationship_edits_{active_model['id']}"):
+                        cleaned_relationships = []
+                        required_fields = ["from_table", "from_column", "to_table", "to_column"]
+
+                        for _, row in edited_df.iterrows():
+                            rel = {k: str(row.get(k, "")).strip() for k in ["name", *required_fields]}
+                            if not all(rel.get(f) for f in required_fields):
+                                continue
+                            if not rel.get("name"):
+                                rel["name"] = f"{rel['from_table']}_{rel['to_table']}_{rel['from_column']}"
+                            cleaned_relationships.append(rel)
+
+                        metadata = model_store.load_metadata(active_model["id"])
+                        metadata["relationships"] = cleaned_relationships
+                        notes = metadata.setdefault("ingestion_notes", [])
+                        notes.append(
+                            f"User validated/edited relationships: {len(cleaned_relationships)} active relationship(s)"
+                        )
+                        model_store.save_metadata(active_model["id"], metadata)
+
+                        updated_result = {
+                            "model_id": active_model["id"],
+                            "total_detected": len(cleaned_relationships),
+                            "new_relationships": 0,
+                            "relationships": cleaned_relationships,
+                        }
+                        st.session_state.relationship_result = updated_result
+                        st.session_state.relationship_result_model_id = active_model["id"]
+                        st.session_state.agent = _build_agent_for_model(
+                            api_key=api_key_input,
+                            metadata=metadata,
+                            model_id=active_model["id"],
+                        )
+                        st.session_state.agent_model_id = active_model["id"]
+                        st.success("Relationship edits saved successfully.")
+                        st.rerun()
+
+                with ec2:
+                    if st.button("🔁 Re-Detect Relationships", key=f"redetect_relationships_{active_model['id']}"):
+                        refreshed = model_store.identify_relationships(active_model["id"])
+                        st.session_state.relationship_result = refreshed
+                        st.session_state.relationship_result_model_id = active_model["id"]
+                        st.rerun()
+                
+                with ec3:
+                    if st.button("🗑️ Clear All Relationships", key=f"clear_relationships_{active_model['id']}", help="Delete all relationships"):
+                        if st.session_state.get(f"confirm_clear_rel_{active_model['id']}", False):
+                            metadata = model_store.load_metadata(active_model["id"])
+                            metadata["relationships"] = []
+                            notes = metadata.setdefault("ingestion_notes", [])
+                            notes.append("User cleared all relationships")
+                            model_store.save_metadata(active_model["id"], metadata)
+                            st.session_state.relationship_result = {
+                                "model_id": active_model["id"],
+                                "total_detected": 0,
+                                "relationships": [],
+                            }
+                            st.session_state.relationship_result_model_id = active_model["id"]
+                            st.success("All relationships cleared.")
+                            st.rerun()
+                        else:
+                            st.session_state[f"confirm_clear_rel_{active_model['id']}"] = True
+                            st.warning("Click again to confirm clearing all relationships")
+                            st.rerun()
+
+        # Show model view if button was clicked
+        if st.session_state.get("show_model_view", False):
+            st.write("### Model Schema View")
+            with st.expander("📊 Tables", expanded=True):
+                tables_in_model = active_metadata.get("tables", {}) if isinstance(active_metadata, dict) else {}
+                if not tables_in_model:
+                    st.info("No tables discovered yet. Upload a PBIX, CSV, or JSON metadata file.")
+                else:
+                    tables_rows = []
+                    for table_name, info in tables_in_model.items():
+                        tables_rows.append(
+                            {
+                                "Table": table_name,
+                                "Columns": len(info.get("columns", {})),
+                                "Column Names": ", ".join(info.get("columns", {}).keys()),
+                            }
+                        )
+                    st.dataframe(pd.DataFrame(tables_rows), use_container_width=True)
+            
+            with st.expander("🔗 Relationships", expanded=True):
+                rels = active_metadata.get("relationships", []) if isinstance(active_metadata, dict) else []
+                if not rels:
+                    st.info("No relationships discovered yet.")
+                else:
+                    rels_rows = []
+                    for rel in rels:
+                        rels_rows.append(
+                            {
+                                "From": f"{rel.get('from_table', '')}.{rel.get('from_column', '')}",
+                                "To": f"{rel.get('to_table', '')}.{rel.get('to_column', '')}",
+                            }
+                        )
+                    st.dataframe(pd.DataFrame(rels_rows), use_container_width=True)
+            
+            with st.expander("📝 Ingestion Notes", expanded=False):
+                notes = active_metadata.get("ingestion_notes", []) if isinstance(active_metadata, dict) else []
+                if notes:
+                    for note in notes:
+                        st.write(f"• {note}")
+                else:
+                    st.info("No ingestion notes yet.")
+
         uploads = st.file_uploader(
             "Upload PBIX / screenshot / metadata files",
-            type=["pbix", "png", "jpg", "jpeg", "webp", "json", "csv", "tsv", "txt", "md"],
+            type=["pbix", "pbit", "png", "jpg", "jpeg", "webp", "json", "csv", "tsv", "txt", "md"],
             accept_multiple_files=True,
             key="model_uploads",
         )
@@ -194,31 +519,118 @@ def run_ui() -> None:
             else:
                 for up in uploads:
                     model_store.add_upload(active_model["id"], up.name, up.getvalue())
-                st.success(f"Stored {len(uploads)} file(s) and updated model metadata.")
+
+                # Reload metadata to show detected relationships
+                updated_metadata = model_store.load_metadata(active_model["id"])
+                
+                profile = _train_active_model(model_store, active_model["id"], agent)
+                trained_msg = (
+                    " Model training applied"
+                    f" (table={profile.get('preferred_table', 'n/a')},"
+                    f" value={profile.get('preferred_value_column', 'n/a')})."
+                )
+                
+                # Show relationship detection results
+                relationships = updated_metadata.get("relationships", [])
+                rel_count = len(relationships)
+                rel_msg = f" Detected {rel_count} relationship(s)." if rel_count > 0 else ""
+
+                st.success(f"Stored {len(uploads)} file(s) and updated model metadata.{rel_msg}{trained_msg}")
+                
+                # Display detected relationships if any
+                if rel_count > 0:
+                    with st.expander("🔗 Auto-Detected Relationships", expanded=True):
+                        rel_rows = []
+                        for rel in relationships:
+                            rel_rows.append({
+                                "From": f"{rel.get('from_table')}.{rel.get('from_column')}",
+                                "To": f"{rel.get('to_table')}.{rel.get('to_column')}",
+                            })
+                        st.dataframe(pd.DataFrame(rel_rows), use_container_width=True)
+                
                 st.session_state.agent = _build_agent_for_model(
                     api_key=api_key_input,
-                    metadata=model_store.load_metadata(active_model["id"]),
+                    metadata=updated_metadata,
                     model_id=active_model["id"],
                 )
                 st.session_state.agent_model_id = active_model["id"]
+                st.rerun()
 
         refreshed_active = model_store.get_model(active_model["id"]) or active_model
         if refreshed_active.get("uploads"):
-            st.write("Uploaded files")
-            upload_rows = [
-                {
-                    "filename": u.get("filename", ""),
-                    "uploaded_at": u.get("uploaded_at", ""),
-                    "stored_path": u.get("stored_path", ""),
-                }
-                for u in refreshed_active.get("uploads", [])
-            ]
-            st.dataframe(pd.DataFrame(upload_rows), use_container_width=True)
+            with st.expander("📁 Uploaded Files", expanded=True):
+                col1, col2, col3, col4 = st.columns([1.5, 1, 1, 0.5])
+                with col1:
+                    st.write("**Filename**")
+                with col2:
+                    st.write("**Uploaded At**")
+                with col3:
+                    st.write("**Path**")
+                with col4:
+                    st.write("**Action**")
+                
+                for idx, upload in enumerate(refreshed_active.get("uploads", [])):
+                    c1, c2, c3, c4 = st.columns([1.5, 1, 1, 0.5])
+                    with c1:
+                        st.write(upload.get("filename", ""))
+                    with c2:
+                        st.write(upload.get("uploaded_at", "")[:10])  # Show only date
+                    with c3:
+                        st.caption(upload.get("stored_path", "")[-30:])  # Show last 30 chars
+                    with c4:
+                        if st.button("🗑️", key=f"delete_upload_{idx}_{active_model['id']}", help="Delete file"):
+                            if model_store.delete_upload(active_model["id"], upload.get("filename")):
+                                st.success(f"Deleted: {upload.get('filename')}")
+                                st.rerun()
+                            else:
+                                st.error("Failed to delete file")
+            
+            # NEW: Preview uploaded CSV files in table format
+            st.subheader("📊 Data Preview")
+            preview_file = st.selectbox(
+                "Select a file to preview",
+                options=[u.get("filename", "") for u in refreshed_active.get("uploads", [])],
+                key="preview_file_selector"
+            )
+            
+            if preview_file:
+                try:
+                    # Find the selected upload
+                    selected_upload = next((u for u in refreshed_active.get("uploads", []) if u.get("filename") == preview_file), None)
+                    if selected_upload:
+                        file_path = selected_upload.get("stored_path")
+                        if file_path and Path(file_path).exists():
+                            # Read CSV and display
+                            preview_df = pd.read_csv(file_path)
+                            st.write(f"**Rows:** {len(preview_df)} | **Columns:** {len(preview_df.columns)}")
+                            st.dataframe(preview_df, use_container_width=True)
+                            
+                            # Show column info
+                            with st.expander("📋 Column Information"):
+                                col_info = []
+                                for col in preview_df.columns:
+                                    col_info.append({
+                                        "Column": col,
+                                        "Type": str(preview_df[col].dtype),
+                                        "Non-Null Count": preview_df[col].count(),
+                                        "Null Count": preview_df[col].isna().sum()
+                                    })
+                                st.dataframe(pd.DataFrame(col_info), use_container_width=True)
+                        else:
+                            st.warning(f"File not found: {file_path}")
+                except Exception as e:
+                    st.error(f"Error reading file: {str(e)}")
 
     with tab_generate:
         st.subheader("Generate New Item")
         with st.form("generate_form"):
             item_type = st.selectbox("Item Type", ["measure", "flag", "column", "table"], index=0)
+            output_language = st.selectbox("Output Language", ["DAX", "SQL", "PySpark", "Python"], index=0)
+            usage_target = st.selectbox(
+                "Where will this be used?",
+                ["Semantic Model", "Warehouse", "Notebook", "Python Script"],
+                index=0,
+            )
             description = st.text_input("Description", placeholder="Create month over month sales growth")
             conditions = st.text_input("Conditions (optional)", placeholder="where Sales > 1000")
             auto_register = st.checkbox("Auto-register item", value=True)
@@ -228,36 +640,103 @@ def run_ui() -> None:
             if not description.strip():
                 st.error("Description is required.")
             else:
-                result = agent.generate_item(
-                    description=description.strip(),
-                    item_type=item_type,
-                    conditions=conditions.strip(),
-                    auto_register=auto_register,
-                )
+                if output_language == "DAX" and usage_target == "Semantic Model":
+                    result = agent.generate_item(
+                        description=description.strip(),
+                        item_type=item_type,
+                        conditions=conditions.strip(),
+                        auto_register=auto_register,
+                    )
 
-                st.success(f"✓ Generated: {result['name']} ({result['item_type']})")
+                    st.success(f"✓ Generated: {result['name']} ({result['item_type']})")
 
-                if result["validation_errors"]:
-                    st.warning("Validation issues found:")
-                    for issue in result["validation_errors"]:
-                        st.write(f"- {issue}")
+                    if result["validation_errors"]:
+                        st.warning("Validation issues found:")
+                        for issue in result["validation_errors"]:
+                            st.write(f"- {issue}")
+                    else:
+                        st.success("Validation passed.")
+
+                    with st.expander("📝 View Expression (DAX/Spark Query)", expanded=False):
+                        st.code(result["expression"], language="sql")
+                        st.write("**Explanation**")
+                        st.write(result["explanation"])
+
+                    with st.expander("📋 Paste-Ready Query", expanded=True):
+                        st.code(result.get("paste_ready_query", result["expression"]), language="sql")
+
+                    if result["similar_candidates"]:
+                        st.write("**Similar candidates**")
+                        for name, score in result["similar_candidates"]:
+                            st.write(f"- {name} ({score:.2f})")
+
+                    st.write("**Optimization tips**")
+                    for tip in result["tips"]:
+                        st.write(f"- {tip}")
                 else:
-                    st.success("Validation passed.")
+                    target_map = {
+                        "Semantic Model": "semantic",
+                        "Warehouse": "warehouse",
+                        "Notebook": "notebook",
+                        "Python Script": "python",
+                    }
+                    target = target_map.get(usage_target, "semantic")
 
-                # Show expression in expandable section
-                with st.expander("📝 View Expression (DAX/Spark Query)", expanded=False):
-                    st.code(result["expression"], language="sql")
+                    if output_language == "SQL":
+                        target = "warehouse"
+                    elif output_language == "PySpark":
+                        target = "notebook"
+                    elif output_language == "Python":
+                        target = "python"
+                    elif output_language == "DAX":
+                        target = "semantic"
+
+                    # ENHANCED: Build detailed prompt with full schema context
+                    schema_context = ""
+                    active_metadata = model_store.load_metadata(active_model["id"])
+                    if isinstance(active_metadata, dict):
+                        tables = active_metadata.get("tables", {})
+                        if tables:
+                            schema_context = "\n\nAvailable tables and columns:\n"
+                            for table_name, info in tables.items():
+                                columns = info.get("columns", {})
+                                col_list = ", ".join(columns.keys()) if columns else "No columns"
+                                schema_context += f"- {table_name}: {col_list}\n"
+                        
+                        relationships = active_metadata.get("relationships", [])
+                        if relationships:
+                            schema_context += "\nRelationships:\n"
+                            for rel in relationships:
+                                schema_context += f"- {rel.get('from_table')}.{rel.get('from_column')} -> {rel.get('to_table')}.{rel.get('to_column')}\n"
+                    
+                    universal_prompt = f"Create {item_type}: {description.strip()}"
+                    if conditions.strip():
+                        universal_prompt += f" with conditions {conditions.strip()}"
+                    universal_prompt += schema_context
+
+                    u_result = universal_assistant.run_once(universal_prompt, target=target)
+                    st.success(f"✓ Generated {u_result.get('type', output_language)} for {usage_target}.")
+
+                    lang_map = {
+                        "DAX": "sql",
+                        "SQL": "sql",
+                        "PySpark": "python",
+                        "Python": "python",
+                    }
+                    st.code(u_result.get("code", ""), language=lang_map.get(u_result.get("type", "Python"), "text"))
                     st.write("**Explanation**")
-                    st.write(result["explanation"])
+                    st.write(u_result.get("explanation", ""))
 
-                if result["similar_candidates"]:
-                    st.write("**Similar candidates**")
-                    for name, score in result["similar_candidates"]:
-                        st.write(f"- {name} ({score:.2f})")
+                    st.write("**Paste-Ready Query/Script**")
+                    st.code(
+                        u_result.get("paste_ready_query", u_result.get("code", "")),
+                        language=lang_map.get(u_result.get("type", "Python"), "text"),
+                    )
 
-                st.write("**Optimization tips**")
-                for tip in result["tips"]:
-                    st.write(f"- {tip}")
+                    if u_result.get("errors"):
+                        st.write("**Validation Issues**")
+                        for err in u_result.get("errors", []):
+                            st.write(f"- {err}")
 
     with tab_items:
         st.subheader("Created and Existing Items")
@@ -285,6 +764,44 @@ def run_ui() -> None:
             st.info("No items match the selected filters.")
         else:
             st.dataframe(df_items, use_container_width=True)
+
+            st.write("### Click an item to view definition and code")
+            if "selected_created_item" not in st.session_state:
+                st.session_state.selected_created_item = ""
+
+            item_names = [str(i.get("name", "")).strip() for i in filtered if str(i.get("name", "")).strip()]
+            item_names = sorted(list(dict.fromkeys(item_names)))
+
+            if item_names:
+                selected_name = st.selectbox(
+                    "Select item",
+                    options=item_names,
+                    index=item_names.index(st.session_state.selected_created_item)
+                    if st.session_state.selected_created_item in item_names
+                    else 0,
+                    key="selected_created_item_selectbox",
+                )
+                st.session_state.selected_created_item = selected_name
+
+                selected_item = None
+                for itm in filtered:
+                    if str(itm.get("name", "")).strip() == selected_name:
+                        selected_item = itm
+                        break
+
+                if selected_item:
+                    st.write("#### Item Definition")
+                    st.write(f"- Name: {selected_item.get('name', '')}")
+                    st.write(f"- Type: {selected_item.get('item_type', '')}")
+                    st.write(f"- Source: {selected_item.get('source', '')}")
+                    st.write(f"- Definition: {selected_item.get('description', '') or 'No description available.'}")
+                    if selected_item.get("created_at"):
+                        st.write(f"- Created At: {selected_item.get('created_at', '')}")
+
+                    st.write("#### Generated Code / Expression")
+                    expr = selected_item.get("expression", "")
+                    code_lang = "sql"
+                    st.code(expr if expr else "No expression/code stored for this item.", language=code_lang)
 
     with tab_schema:
         st.subheader("Semantic Model Schema")
@@ -349,9 +866,209 @@ def run_ui() -> None:
             mime="application/json",
         )
 
+    with tab_fabric:
+        st.subheader("Universal Fabric Assistant")
+        st.write(
+            "Generate DAX, SQL, PySpark, and Python logic with model discovery, validation, and duplicate detection."
+        )
+
+        learned_tables = len(universal_assistant.store.metadata.get("tables", {}))
+        learned_rels = len(universal_assistant.store.metadata.get("relationships", []))
+        created_objects = len(universal_assistant.store.registry.get("objects", {}))
+        f1, f2, f3 = st.columns(3)
+        f1.metric("Learned Tables", learned_tables)
+        f2.metric("Detected Relationships", learned_rels)
+        f3.metric("Generated Objects", created_objects)
+
+        tc1, tc2 = st.columns([1, 2])
+        with tc1:
+            if st.button("Train Universal Model", key="train_universal_model"):
+                with st.spinner("Training universal assistant on learned model patterns..."):
+                    profile = universal_assistant.train_model()
+                st.success("Universal model training completed.")
+                st.json(
+                    {
+                        "preferred_table": profile.get("preferred_table"),
+                        "preferred_value_column": profile.get("preferred_value_column"),
+                        "preferred_date_column": profile.get("preferred_date_column"),
+                        "observed_expression_count": profile.get("observed_expression_count", 0),
+                    }
+                )
+                # Preserve metadata from ingestion when rebuilding
+                st.session_state.universal_assistant = _build_universal_assistant(
+                    api_key_input, metadata=universal_assistant.store.metadata
+                )
+                st.rerun()
+        with tc2:
+            up = universal_assistant.store.metadata.get("training_profile", {})
+            if isinstance(up, dict) and up:
+                st.caption(
+                    "Universal profile: "
+                    f"table={up.get('preferred_table', 'n/a')}, "
+                    f"value={up.get('preferred_value_column', 'n/a')}, "
+                    f"date={up.get('preferred_date_column', 'n/a')}"
+                )
+            else:
+                st.caption("No universal training profile yet. Click 'Train Universal Model'.")
+
+        st.markdown("### 1) Data Ingestion")
+        csv_upload = st.file_uploader(
+            "Upload CSV for metadata learning",
+            type=["csv"],
+            key="fabric_csv_upload",
+        )
+
+        if st.button("Ingest CSV", key="fabric_ingest_csv"):
+            if not csv_upload:
+                st.warning("Please upload a CSV file first.")
+            else:
+                uploads_dir = universal_assistant.store.root / "uploads"
+                uploads_dir.mkdir(parents=True, exist_ok=True)
+                target_path = uploads_dir / csv_upload.name
+                target_path.write_bytes(csv_upload.getvalue())
+                ingest_result = universal_assistant.ingestion.load_data(csv_path=str(target_path))
+                st.json(ingest_result)
+                if auto_train_universal:
+                    profile = universal_assistant.train_model()
+                    st.info(
+                        "Auto-training completed: "
+                        f"table={profile.get('preferred_table', 'n/a')}, "
+                        f"value={profile.get('preferred_value_column', 'n/a')}"
+                    )
+                # Preserve metadata from ingestion when rebuilding
+                st.session_state.universal_assistant = _build_universal_assistant(
+                    api_key_input, metadata=universal_assistant.store.metadata
+                )
+
+        c1, c2 = st.columns([3, 1])
+        with c1:
+            fabric_table_name = st.text_input(
+                "Spark/Lakehouse/Warehouse table name",
+                placeholder="sales_fact",
+                key="fabric_table_name",
+            )
+        with c2:
+            if st.button("Register Table", key="fabric_register_table"):
+                if not fabric_table_name.strip():
+                    st.warning("Enter a table name.")
+                else:
+                    table_result = universal_assistant.ingestion.load_data(table_name=fabric_table_name.strip())
+                    st.json(table_result)
+                    if auto_train_universal:
+                        profile = universal_assistant.train_model()
+                        st.info(
+                            "Auto-training completed: "
+                            f"table={profile.get('preferred_table', 'n/a')}, "
+                            f"value={profile.get('preferred_value_column', 'n/a')}"
+                        )
+                    # Preserve metadata from ingestion when rebuilding
+                    st.session_state.universal_assistant = _build_universal_assistant(
+                        api_key_input, metadata=universal_assistant.store.metadata
+                    )
+
+        st.markdown("### 2) Model Discovery")
+        if st.button("Discover Model", key="fabric_discover"):
+            discovery_result = universal_assistant.discovery.discover_model()
+            st.json(discovery_result)
+            if auto_train_universal:
+                profile = universal_assistant.train_model()
+                st.info(
+                    "Auto-training completed: "
+                    f"table={profile.get('preferred_table', 'n/a')}, "
+                    f"value={profile.get('preferred_value_column', 'n/a')}"
+                )
+            # Preserve metadata from discovery when rebuilding
+            st.session_state.universal_assistant = _build_universal_assistant(
+                api_key_input, metadata=universal_assistant.store.metadata
+            )
+
+        with st.expander("View LLM Context", expanded=False):
+            st.text(universal_assistant.build_context())
+
+        st.markdown("### 3) Multi-Language Generation")
+        with st.form("fabric_generate_form"):
+            target = st.selectbox(
+                "Target Layer",
+                ["auto", "semantic", "warehouse", "notebook", "python"],
+                index=3,
+            )
+            st.caption("Tip: choose `notebook` for long PySpark code, `warehouse` for SQL, `semantic` for DAX.")
+            request = st.text_area(
+                "Request",
+                placeholder="Create total sales by customer and month",
+                height=90,
+            )
+            submit_fabric = st.form_submit_button("Generate")
+
+        if submit_fabric:
+            if not request.strip():
+                st.error("Request is required.")
+            else:
+                target_arg = None if target == "auto" else target
+                result = universal_assistant.run_once(request.strip(), target=target_arg)
+
+                status = result.get("validation", "failed")
+                if status == "passed":
+                    st.success(f"Generated {result.get('type', '')} code successfully.")
+                else:
+                    st.warning("Generated output has validation issues or duplicates.")
+
+                lang_map = {
+                    "DAX": "sql",
+                    "SQL": "sql",
+                    "PySpark": "python",
+                    "Python": "python",
+                }
+                st.code(result.get("code", ""), language=lang_map.get(result.get("type", "Python"), "text"))
+                st.write("**Explanation**")
+                st.write(result.get("explanation", ""))
+
+                st.write("**Paste-Ready Query/Script**")
+                st.code(
+                    result.get("paste_ready_query", result.get("code", "")),
+                    language=lang_map.get(result.get("type", "Python"), "text"),
+                )
+
+                if result.get("errors"):
+                    st.write("**Validation Issues**")
+                    for err in result.get("errors", []):
+                        st.write(f"- {err}")
+
+                with st.expander("Detailed Response", expanded=False):
+                    st.json(result)
+
+                # Preserve metadata from generation when rebuilding
+                st.session_state.universal_assistant = _build_universal_assistant(
+                    api_key_input, metadata=universal_assistant.store.metadata
+                )
+
+        st.markdown("### 4) Learning Store")
+        store_meta = universal_assistant.store.metadata
+        tables_rows = []
+        for table_name, info in store_meta.get("tables", {}).items():
+            tables_rows.append(
+                {
+                    "table": table_name,
+                    "column_count": info.get("column_count", 0),
+                    "source": info.get("source", ""),
+                }
+            )
+
+        if tables_rows:
+            st.dataframe(pd.DataFrame(tables_rows), use_container_width=True)
+        else:
+            st.info("No learned tables yet. Ingest a CSV or register a table to begin learning.")
+
+        with st.expander("Metadata JSON", expanded=False):
+            st.code(json.dumps(store_meta, indent=2), language="json")
+
     with tab_demo:
         st.subheader("Run Demo Scenario")
         st.write("This will generate demo items (measure, flag, measure, table).")
+
+        if "demo_results" not in st.session_state:
+            st.session_state.demo_results = []
+
         if st.button("Run Demo"):
             demo_requests = [
                 {"item_type": "measure", "description": "Create total sales measure"},
@@ -382,18 +1099,17 @@ def run_ui() -> None:
                         )
                     )
 
+            st.session_state.demo_results = results
             st.success("✓ Demo completed. Items have been created and stored.")
+
+        if st.session_state.demo_results:
             st.markdown("---")
             st.write("**Created Items:**")
-            for idx, result in enumerate(results, start=1):
-                col1, col2 = st.columns([3, 1])
-                with col1:
-                    st.write(f"[{idx}] {result['name']} ({result['item_type']})")
-                with col2:
-                    if st.button(f"View", key=f"demo_expr_{idx}"):
-                        st.markdown("---")
-                        with st.expander("📝 Expression", expanded=True):
-                            st.code(result["expression"], language="sql")
+            for idx, result in enumerate(st.session_state.demo_results, start=1):
+                st.write(f"[{idx}] {result['name']} ({result['item_type']})")
+                with st.expander(f"View Expression: {result['name']}", expanded=False):
+                    st.code(result["expression"], language="sql")
+                    st.write(result.get("explanation", ""))
 
 
 def main() -> None:

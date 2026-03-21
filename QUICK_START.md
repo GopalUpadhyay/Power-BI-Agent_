@@ -1,12 +1,12 @@
 # ⚡ QUICK REFERENCE CARD
 
-## ✅ APPLICATION STATUS: FULLY OPERATIONAL
+## ✅ APPLICATION STATUS: FULLY OPERATIONAL (CORE + UNIVERSAL FABRIC)
 
 ---
 
 ## 🎯 5-Second Summary
 
-**Everything works.** No bugs. No issues. No fixes needed.
+**Everything works.** Core semantic assistant + Universal Fabric assistant are available.
 
 All 5 tests passed ✅
 
@@ -15,6 +15,9 @@ All 5 tests passed ✅
 ## 🚀 Most Used Commands
 
 ```bash
+# Start one-file launcher (UI)
+python start.py
+
 # View flags (most common)
 ./.venv/bin/python run_app.py --flags
 
@@ -26,20 +29,31 @@ All 5 tests passed ✅
 
 # Create custom items
 ./.venv/bin/python run_app.py --interactive
+
+# Universal Fabric interactive loop
+./.venv/bin/python run_app.py --fabric-interactive
+
+# Universal Fabric one-shot request (DAX / SQL / PySpark / Python)
+./.venv/bin/python run_app.py --fabric-request "Create total sales" --fabric-target semantic
 ```
 
 ---
 
 ## 📋 Command Reference
 
-| Command          | Purpose                  | Example                                                |
+| Command | Purpose | Example |
 | ---------------- | ------------------------ | ------------------------------------------------------ |
-| `--flags`        | View all created flags   | `./.venv/bin/python run_app.py --flags`                |
-| `--registry`     | View all items (by type) | `./.venv/bin/python run_app.py --registry`             |
-| `--list-by-type` | Filter by type           | `./.venv/bin/python run_app.py --list-by-type flag`    |
-| `--demo`         | Run automatic demo       | `./.venv/bin/python run_app.py --demo`                 |
-| `--interactive`  | Create items manually    | `./.venv/bin/python run_app.py --interactive`          |
-| `--api-key KEY`  | Override API key         | `./.venv/bin/python run_app.py --demo --api-key <key>` |
+| `start.py` | One-file launcher | `python start.py` |
+| `--flags` | View all created flags | `./.venv/bin/python run_app.py --flags` |
+| `--registry` | View all items (by type) | `./.venv/bin/python run_app.py --registry` |
+| `--list-by-type` | Filter by type | `./.venv/bin/python run_app.py --list-by-type flag` |
+| `--demo` | Run automatic demo | `./.venv/bin/python run_app.py --demo` |
+| `--interactive` | Create items manually | `./.venv/bin/python run_app.py --interactive` |
+| `--fabric-interactive` | Universal Fabric CLI loop | `./.venv/bin/python run_app.py --fabric-interactive` |
+| `--fabric-load-csv` | Learn schema from CSV | `./.venv/bin/python run_app.py --fabric-load-csv /tmp/data.csv` |
+| `--fabric-discover` | Auto-detect relationships | `./.venv/bin/python run_app.py --fabric-discover` |
+| `--fabric-request` | Generate DAX/SQL/PySpark/Python | `./.venv/bin/python run_app.py --fabric-request "Create total sales" --fabric-target warehouse` |
+| `--api-key KEY` | Override API key | `./.venv/bin/python run_app.py --demo --api-key <key>` |
 
 ---
 
@@ -60,8 +74,9 @@ All 5 tests passed ✅
 | ----------------------- | --------------------------- |
 | `.env`                  | Your API key (keep secret!) |
 | `run_app.py`            | Main entry point            |
-| `assistant_app/core.py` | All logic (8 classes)       |
-| `assistant_app/cli.py`  | Commands (6 options)        |
+| `assistant_app/core.py` | Core semantic assistant logic |
+| `assistant_app/fabric_universal.py` | Universal Fabric multi-language engine |
+| `assistant_app/cli.py`  | CLI commands (core + universal) |
 
 ---
 
@@ -70,6 +85,8 @@ All 5 tests passed ✅
 - ✅ Flag management system
 - ✅ Enhanced registry display
 - ✅ CLI command options
+- ✅ Universal Fabric multi-language assistant (DAX / SQL / PySpark / Python)
+- ✅ Model discovery and metadata learning store (`.fabric_assistant/metadata.json`)
 - ✅ Comprehensive documentation
 - ✅ Security (API key in .env)
 

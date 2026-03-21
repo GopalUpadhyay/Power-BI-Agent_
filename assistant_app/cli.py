@@ -1,5 +1,6 @@
 import argparse
 import csv
+import json
 import logging
 from pathlib import Path
 from typing import Any, Dict, Optional
@@ -15,6 +16,20 @@ from .core import (
     ValidationEngine,
     configure_openai_client,
 )
+from .fabric_universal import (
+    ContextBuilder,
+    DataIngestionLayer,
+    DuplicateDetectionEngine,
+    ExecutionEngine,
+    IntentDetectionEngine,
+    MetadataStore,
+    ModelDiscoveryEngine,
+    MultiLanguageGenerationEngine,
+    UniversalFabricAssistant,
+    configure_openai_client as configure_universal_client,
+    run_agent as run_universal_agent,
+)
+from .training_engine import FabricModelTrainer
 
 
 def build_agent(
@@ -25,10 +40,22 @@ def build_agent(
     client = configure_openai_client(api_key=api_key)
     loader = None if metadata_override else SparkDataLoader()
     metadata = SemanticModelMetadata(loader=loader, metadata_override=metadata_override)
+    resolved_registry_path = Path(registry_path) if registry_path else (Path(__file__).resolve().parents[1] / ".assistant_registry.json")
+
+    # Auto-load training profile if available for this registry/model.
+    training_path = resolved_registry_path.parent / (resolved_registry_path.stem + ".training.json")
+    if training_path.exists():
+        try:
+            training_profile = json.loads(training_path.read_text(encoding="utf-8"))
+            if isinstance(training_profile, dict):
+                metadata.metadata["training_profile"] = training_profile
+        except Exception:
+            pass
+
     context_builder = AIContextBuilder(metadata)
     generator = DAXGenerationEngine(client=client, context_builder=context_builder)
     validator = ValidationEngine(metadata)
-    registry = MeasureRegistry(metadata, storage_path=Path(registry_path) if registry_path else None)
+    registry = MeasureRegistry(metadata, storage_path=resolved_registry_path)
     explainer = ExplanationModule(generator)
     return PowerBIAssistantAgent(
         metadata=metadata,
@@ -319,6 +346,39 @@ def show_expression(agent: PowerBIAssistantAgent, item_name: str) -> None:
     print("-" * 70 + "\n")
 
 
+def train_model(agent: PowerBIAssistantAgent) -> None:
+    """Train the assistant on current model schema + expression history."""
+    expressions = []
+
+    for item in agent.registry.items.values():
+        expr = item.get("expression", "")
+        if expr:
+            expressions.append(expr)
+
+    for measure in agent.metadata.metadata.get("measures", {}).values():
+        if isinstance(measure, dict):
+            expr = measure.get("expression", "")
+            if expr:
+                expressions.append(expr)
+
+    profile = FabricModelTrainer.train(agent.metadata.metadata, expressions)
+    agent.metadata.metadata["training_profile"] = profile
+
+    # Persist profile to registry storage companion file.
+    profile_path = agent.registry.storage_path.parent / (agent.registry.storage_path.stem + ".training.json")
+    profile_path.write_text(json.dumps(profile, indent=2), encoding="utf-8")
+
+    print("\n" + "=" * 70)
+    print("MODEL TRAINING COMPLETED")
+    print("=" * 70)
+    print(f"Preferred Table       : {profile.get('preferred_table', 'n/a')}")
+    print(f"Preferred Value Column: {profile.get('preferred_value_column', 'n/a')}")
+    print(f"Preferred Date Column : {profile.get('preferred_date_column', 'n/a')}")
+    print(f"Expressions Learned   : {profile.get('observed_expression_count', 0)}")
+    print(f"Training Profile File : {profile_path}")
+    print("=" * 70 + "\n")
+
+
 
 def main() -> None:
     parser = argparse.ArgumentParser(
@@ -388,6 +448,52 @@ def main() -> None:
         help="Run backend validation tests on generated fields",
     )
     parser.add_argument(
+        "--train-model",
+        action="store_true",
+        help="Train assistant on current model schema and usage patterns",
+    )
+    parser.add_argument(
+        "--fabric-interactive",
+        action="store_true",
+        help="Run Universal Fabric assistant interactive loop",
+    )
+    parser.add_argument(
+        "--fabric-request",
+        type=str,
+        help="Run a single Universal Fabric request",
+    )
+    parser.add_argument(
+        "--fabric-target",
+        type=str,
+        choices=["semantic", "warehouse", "notebook", "python", "dax", "sql", "pyspark"],
+        help="Preferred output target for --fabric-request",
+    )
+    parser.add_argument(
+        "--fabric-load-csv",
+        type=str,
+        help="Load CSV file into Universal Fabric metadata learning store",
+    )
+    parser.add_argument(
+        "--fabric-load-table",
+        type=str,
+        help="Load Spark/Lakehouse/Warehouse table reference into learning store",
+    )
+    parser.add_argument(
+        "--fabric-discover",
+        action="store_true",
+        help="Run auto-discovery for tables/relationships in Universal Fabric metadata",
+    )
+    parser.add_argument(
+        "--fabric-identify-relationships",
+        action="store_true",
+        help="Identify/refresh relationships from current Universal Fabric model metadata",
+    )
+    parser.add_argument(
+        "--fabric-train",
+        action="store_true",
+        help="Train Universal Fabric model profile from learned metadata and usage history",
+    )
+    parser.add_argument(
         "--log-level",
         default="INFO",
         choices=["DEBUG", "INFO", "WARNING", "ERROR"],
@@ -400,6 +506,62 @@ def main() -> None:
         level=getattr(logging, args.log_level),
         format="%(asctime)s - %(levelname)s - [%(name)s] - %(message)s",
     )
+
+    if args.fabric_interactive:
+        run_universal_agent(api_key=args.api_key)
+        return
+
+    if (
+        args.fabric_request
+        or args.fabric_load_csv
+        or args.fabric_load_table
+        or args.fabric_discover
+        or args.fabric_identify_relationships
+        or args.fabric_train
+    ):
+        store = MetadataStore()
+        ingestion = DataIngestionLayer(store)
+        discovery = ModelDiscoveryEngine(store)
+
+        if args.fabric_load_csv:
+            print(json.dumps(ingestion.load_data(csv_path=args.fabric_load_csv), indent=2))
+        if args.fabric_load_table:
+            print(json.dumps(ingestion.load_data(table_name=args.fabric_load_table), indent=2))
+        if args.fabric_discover:
+            print(json.dumps(discovery.discover_model(), indent=2))
+        if args.fabric_identify_relationships:
+            rels = discovery.detect_relationships(store.metadata.get("tables", {}))
+            store.metadata["relationships"] = rels
+            store.save_metadata()
+            print(json.dumps({"relationship_count": len(rels), "relationships": rels}, indent=2))
+
+        if args.fabric_train:
+            client = configure_universal_client(api_key=args.api_key)
+            assistant = UniversalFabricAssistant(
+                store=store,
+                ingestion=ingestion,
+                discovery=discovery,
+                detector=IntentDetectionEngine(),
+                generator=MultiLanguageGenerationEngine(client, context_builder=ContextBuilder(store.metadata)),
+                executor=ExecutionEngine(),
+                duplicate=DuplicateDetectionEngine(store),
+            )
+            print(json.dumps(assistant.train_model(), indent=2))
+
+        if args.fabric_request:
+            client = configure_universal_client(api_key=args.api_key)
+            assistant = UniversalFabricAssistant(
+                store=store,
+                ingestion=ingestion,
+                discovery=discovery,
+                detector=IntentDetectionEngine(),
+                generator=MultiLanguageGenerationEngine(client, context_builder=ContextBuilder(store.metadata)),
+                executor=ExecutionEngine(),
+                duplicate=DuplicateDetectionEngine(store),
+            )
+            result = assistant.run_once(args.fabric_request, target=args.fabric_target)
+            print(json.dumps(result, indent=2))
+        return
 
     agent = build_agent(api_key=args.api_key)
 
@@ -423,6 +585,8 @@ def main() -> None:
         export_created_csv(agent, output_path=args.export_created_csv)
     elif args.test_created:
         test_created_fields(agent)
+    elif args.train_model:
+        train_model(agent)
     elif args.show_expression:
         show_expression(agent, item_name=args.show_expression)
     else:
@@ -443,6 +607,15 @@ def main() -> None:
         print("\nExport & Test Commands:")
         print("  python run_app.py --export-created-csv FILE  # Export to CSV")
         print("  python run_app.py --test-created      # Validate created fields")
+        print("  python run_app.py --train-model       # Train on current model patterns")
+        print("\nUniversal Fabric Commands:")
+        print("  python run_app.py --fabric-interactive")
+        print("  python run_app.py --fabric-load-csv PATH")
+        print("  python run_app.py --fabric-load-table TABLE")
+        print("  python run_app.py --fabric-discover")
+        print("  python run_app.py --fabric-identify-relationships")
+        print("  python run_app.py --fabric-train")
+        print("  python run_app.py --fabric-request \"Create total sales\" --fabric-target semantic")
         print("\nOptions:")
         print("  --api-key KEY                         # Provide OpenAI API key")
         print("  --log-level {DEBUG,INFO,WARNING}      # Set logging level")

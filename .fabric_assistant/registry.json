@@ -1,0 +1,189 @@
+{
+  "objects": {
+    "pyspark_transformation:pyspark_transformation_create_total_sales": {
+      "name": "pyspark_transformation_Create_total_sales",
+      "object_type": "pyspark_transformation",
+      "language": "PySpark",
+      "code": "result_df = df.groupBy().sum('Sales').withColumnRenamed('sum(Sales)', 'TotalSales')",
+      "request": "Create total sales",
+      "created_at": "2026-03-19T23:16:12.607937"
+    },
+    "dax_measure:dax_measure_create_total_sales": {
+      "name": "dax_measure_Create_total_sales",
+      "object_type": "dax_measure",
+      "language": "DAX",
+      "code": "SUM(fabric_sales[Sales])",
+      "request": "Create total sales",
+      "created_at": "2026-03-19T23:18:19.987928"
+    },
+    "sql_query:sql_query_create_total_sales": {
+      "name": "sql_query_Create_total_sales",
+      "object_type": "sql_query",
+      "language": "SQL",
+      "code": "SELECT SUM(Sales) AS TotalValue FROM fabric_sales;",
+      "request": "Create total sales",
+      "created_at": "2026-03-19T23:18:26.961760"
+    },
+    "pyspark_transformation:pyspark_transformation_create_average_sales_by_customer": {
+      "name": "pyspark_transformation_Create_average_sales_by_customer",
+      "object_type": "pyspark_transformation",
+      "language": "PySpark",
+      "code": "result_df = df",
+      "request": "Create average sales by customer",
+      "created_at": "2026-03-19T23:18:51.560262"
+    },
+    "python_logic:python_logic_create_python_cleanup_function": {
+      "name": "python_logic_Create_python_cleanup_function",
+      "object_type": "python_logic",
+      "language": "Python",
+      "code": "def transform(records):\n    return records",
+      "request": "Create python cleanup function",
+      "created_at": "2026-03-19T23:18:59.385529"
+    },
+    "dax_measure:dax_measure_create_total_revenue": {
+      "name": "dax_measure_Create_total_revenue",
+      "object_type": "dax_measure",
+      "language": "DAX",
+      "code": "SUM(fabric_sales[Sales])",
+      "request": "Create total revenue",
+      "created_at": "2026-03-19T23:51:15.620736"
+    },
+    "pyspark_transformation:pyspark_transformation_create_a_teacher_table": {
+      "name": "pyspark_transformation_Create_a_teacher_table",
+      "object_type": "pyspark_transformation",
+      "language": "PySpark",
+      "code": "result_df = df",
+      "request": "Create a teacher table",
+      "created_at": "2026-03-19T23:58:34.955020"
+    },
+    "pyspark_transformation:pyspark_transformation_create_table_by_customer_average_sales": {
+      "name": "pyspark_transformation_create_table_by_customer_average_sales",
+      "object_type": "pyspark_transformation",
+      "language": "PySpark",
+      "code": "result_df = df.groupBy('CustomerID').avg('Sales').withColumnRenamed('avg(Sales)', 'metric')\nresult_df.createOrReplaceTempView('result_table')",
+      "request": "create table by customer average sales",
+      "created_at": "2026-03-20T00:11:40.899502"
+    },
+    "sql_query:sql_query_create_table_by_customer_average_sales": {
+      "name": "sql_query_create_table_by_customer_average_sales",
+      "object_type": "sql_query",
+      "language": "SQL",
+      "code": "SELECT CustomerID, AVG(Sales) AS metric\nFROM fabric_sales\nGROUP BY CustomerID;",
+      "request": "create table by customer average sales",
+      "created_at": "2026-03-20T00:11:55.341622"
+    },
+    "dax_measure:dax_measure_create_table_by_customer_average_amount": {
+      "name": "dax_measure_create_table_by_customer_average_amount",
+      "object_type": "dax_measure",
+      "language": "DAX",
+      "code": "SUMMARIZE(orders, orders[CustomerID], \"Metric\", AVERAGE(orders[Amount]))",
+      "request": "create table by customer average amount",
+      "created_at": "2026-03-20T19:38:38.650864"
+    },
+    "pyspark_transformation:pyspark_transformation_create_column_create_top_5_products_by_total_sales_topn_5_summarize": {
+      "name": "pyspark_transformation_Create_column_Create_top_5_products_by_total_sales_TOPN_5_SUMMARIZE",
+      "object_type": "pyspark_transformation",
+      "language": "PySpark",
+      "code": "result_df = df.groupBy().sum('Amount').withColumnRenamed('sum(Amount)', 'metric')",
+      "request": "Create column: Create_top_5_products_by_total_sales = TOPN(5, SUMMARIZE(Targets, Targets[\ufeffEmployeeID], \"Total_Value\", SUM(Targets[\ufeffEmployeeID])), [Total_Value], DESC)",
+      "created_at": "2026-03-20T19:58:14.166519"
+    },
+    "pyspark_transformation:pyspark_transformation_create_table_create_a_full_denormalized_table_by_joining_all_model_": {
+      "name": "pyspark_transformation_Create_table_Create_a_full_denormalized_table_by_joining_all_model_",
+      "object_type": "pyspark_transformation",
+      "language": "PySpark",
+      "code": "result_df = df.groupBy('CustomerID').sum('Amount').withColumnRenamed('sum(Amount)', 'metric')\nresult_df.createOrReplaceTempView('result_table')",
+      "request": "Create table: Create a full denormalized table by joining all model tables. Base table: Sales. Join Product on Sales.ProductKey = Product.ProductKey. Join Region on Sales.SalesTerritoryKey = Region.SalesTerritoryKey. Join SalesPerson on Sales.EmployeeKey = SalesPerson.EmployeeKey. Join SalesPersonRegion on SalesPerson.EmployeeKey = SalesPersonRegion.EmployeeKey. Join Targets on SalesPerson.EmployeeID = Targets.EmployeeID. Select all columns and return one final table named Full_Model_Table.",
+      "created_at": "2026-03-20T20:03:06.708874"
+    },
+    "sql_query:sql_query_create_table_create_a_full_denormalized_table_by_joining_all_model_tab": {
+      "name": "sql_query_Create_table_Create_a_full_denormalized_table_by_joining_all_model_tab",
+      "object_type": "sql_query",
+      "language": "SQL",
+      "code": "SELECT CustomerID, SUM(Amount) AS metric\nFROM orders\nGROUP BY CustomerID;",
+      "request": "Create table: Create a full denormalized table by joining all model tables. Base table: Sales. Join Product on Sales.ProductKey = Product.ProductKey. Join Region on Sales.SalesTerritoryKey = Region.SalesTerritoryKey. Join SalesPerson on Sales.EmployeeKey = SalesPerson.EmployeeKey. Join SalesPersonRegion on SalesPerson.EmployeeKey = SalesPersonRegion.EmployeeKey. Join Targets on SalesPerson.EmployeeID = Targets.EmployeeID. Select all columns and return one final table named Full_Model_Table.",
+      "created_at": "2026-03-20T20:03:55.775107"
+    },
+    "sql_query:sql_query_create_a_full_denormalized_table_by_joining_all_model_tables_with_sale": {
+      "name": "sql_query_Create_a_full_denormalized_table_by_joining_all_model_tables_with_Sale",
+      "object_type": "sql_query",
+      "language": "SQL",
+      "code": "SELECT t0.*\nFROM Sales t0\nLEFT JOIN Product t1 ON t0.ProductKey = t1.ProductKey\nLEFT JOIN Region t2 ON t0.SalesTerritoryKey = t2.SalesTerritoryKey\nLEFT JOIN SalesPerson t3 ON t0.EmployeeKey = t3.EmployeeKey\nLEFT JOIN SalesPersonRegion t4 ON t3.EmployeeKey = t4.EmployeeKey\nLEFT JOIN Targets t5 ON t3.EmployeeID = t5.EmployeeID;",
+      "request": "Create a full denormalized table by joining all model tables with Sales as base table",
+      "created_at": "2026-03-20T20:11:03.159891"
+    },
+    "pyspark_transformation:pyspark_transformation_create_a_full_denormalized_table_by_joining_all_model_tables_with_s": {
+      "name": "pyspark_transformation_Create_a_full_denormalized_table_by_joining_all_model_tables_with_S",
+      "object_type": "pyspark_transformation",
+      "language": "PySpark",
+      "code": "result_df = Sales\nresult_df = result_df.join(Product, result_df['ProductKey'] == Product['ProductKey'], 'left')\nresult_df = result_df.join(Region, result_df['SalesTerritoryKey'] == Region['SalesTerritoryKey'], 'left')\nresult_df = result_df.join(SalesPerson, result_df['EmployeeKey'] == SalesPerson['EmployeeKey'], 'left')\nresult_df = result_df.join(SalesPersonRegion, result_df['EmployeeKey'] == SalesPersonRegion['EmployeeKey'], 'left')\nresult_df = result_df.join(Targets, result_df['EmployeeID'] == Targets['EmployeeID'], 'left')\nresult_df.createOrReplaceTempView('full_model_table')",
+      "request": "Create a full denormalized table by joining all model tables with Sales as base table",
+      "created_at": "2026-03-20T20:11:03.163339"
+    },
+    "pyspark_transformation:pyspark_transformation_create_a_full_denormalized_table_by_joining_all_model_tables_base_t": {
+      "name": "pyspark_transformation_Create_a_full_denormalized_table_by_joining_all_model_tables_Base_t",
+      "object_type": "pyspark_transformation",
+      "language": "PySpark",
+      "code": "result_df = Sales\nresult_df = result_df.join(Product, result_df['ProductKey'] == Product['ProductKey'], 'left')\nresult_df = result_df.join(Region, result_df['SalesTerritoryKey'] == Region['SalesTerritoryKey'], 'left')\nresult_df = result_df.join(SalesPerson, result_df['EmployeeKey'] == SalesPerson['EmployeeKey'], 'left')\nresult_df = result_df.join(SalesPersonRegion, result_df['EmployeeKey'] == SalesPersonRegion['EmployeeKey'], 'left')\nresult_df = result_df.join(Targets, result_df['EmployeeID'] == Targets['EmployeeID'], 'left')\nresult_df.createOrReplaceTempView('full_model_table')",
+      "request": "Create a full denormalized table by joining all model tables. Base table: Sales",
+      "created_at": "2026-03-20T20:18:12.248083"
+    },
+    "pyspark_transformation:pyspark_transformation_create_full_denormalized_table_by_joining_all_tables": {
+      "name": "pyspark_transformation_create_full_denormalized_table_by_joining_all_tables",
+      "object_type": "pyspark_transformation",
+      "language": "PySpark",
+      "code": "result_df = orders\nresult_df = result_df.join(customers, result_df['CustomerID'] == customers['CustomerID'], 'left')\nresult_df.createOrReplaceTempView('full_model_table')",
+      "request": "create full denormalized table by joining all tables",
+      "created_at": "2026-03-20T20:57:01.737066"
+    },
+    "dax_measure:dax_measure_create_total_sales_measure": {
+      "name": "dax_measure_create_total_sales_measure",
+      "object_type": "dax_measure",
+      "language": "DAX",
+      "code": "SUM(orders[Amount])",
+      "request": "create total sales measure",
+      "created_at": "2026-03-20T20:57:01.743254"
+    },
+    "sql_query:sql_query_create_query_by_customer": {
+      "name": "sql_query_create_query_by_customer",
+      "object_type": "sql_query",
+      "language": "SQL",
+      "code": "SELECT CustomerID, SUM(Amount) AS metric\nFROM orders\nGROUP BY CustomerID;",
+      "request": "create query by customer",
+      "created_at": "2026-03-20T20:57:01.746292"
+    },
+    "pyspark_transformation:pyspark_transformation_create_measure_create_top_5_products_table_by_total_sales_get_the_d": {
+      "name": "pyspark_transformation_Create_measure_Create_top_5_products_table_by_total_sales_get_the_d",
+      "object_type": "pyspark_transformation",
+      "language": "PySpark",
+      "code": "result_df = df.groupBy('CustomerID').sum('Amount').withColumnRenamed('sum(Amount)', 'metric')\nresult_df.createOrReplaceTempView('result_table')",
+      "request": "Create measure: Create_top_5_products_table_by_total_sales get the data from the current active model product csv files",
+      "created_at": "2026-03-20T21:09:29.286980"
+    },
+    "pyspark_transformation:pyspark_transformation_create_measure_createtop5productstablebytotal_sales_get_the_data_fr": {
+      "name": "pyspark_transformation_Create_measure_Createtop5productstablebytotal_sales_get_the_data_fr",
+      "object_type": "pyspark_transformation",
+      "language": "PySpark",
+      "code": "result_df = df.groupBy('CustomerID').sum('Amount').withColumnRenamed('sum(Amount)', 'metric')\nresult_df.createOrReplaceTempView('result_table')",
+      "request": "Create measure: Createtop5productstablebytotal_sales get the data from the current active model product csv files",
+      "created_at": "2026-03-20T21:09:56.114527"
+    },
+    "pyspark_transformation:pyspark_transformation_create_total_sales_by_customer": {
+      "name": "pyspark_transformation_Create_total_sales_by_customer",
+      "object_type": "pyspark_transformation",
+      "language": "PySpark",
+      "code": "result_df = df.groupBy('ProductID').sum('SalesID').withColumnRenamed('sum(SalesID)', 'metric')\nresult_df.createOrReplaceTempView('result_table')",
+      "request": "Create total sales by customer",
+      "created_at": "2026-03-20T21:18:27.868277"
+    },
+    "pyspark_transformation:pyspark_transformation_create_total_order_amount_by_customer": {
+      "name": "pyspark_transformation_create_total_order_amount_by_customer",
+      "object_type": "pyspark_transformation",
+      "language": "PySpark",
+      "code": "result_df = df.groupBy('OrderID').sum('TotalAmount').withColumnRenamed('sum(TotalAmount)', 'metric')\nresult_df.createOrReplaceTempView('result_table')",
+      "request": "create total order amount by customer",
+      "created_at": "2026-03-20T21:19:43.606140"
+    }
+  },
+  "updated_at": "2026-03-20T21:19:43.606176"
+}
