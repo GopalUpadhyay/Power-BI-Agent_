@@ -1,5 +1,6 @@
 import csv
 import json
+import logging
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
@@ -21,6 +22,8 @@ from .fabric_universal import (
 )
 from .model_store import ModelStore
 from .training_engine import FabricModelTrainer
+
+logger = logging.getLogger(__name__)
 
 
 def _items_to_dataframe(items: List[Dict[str, Any]]) -> pd.DataFrame:
@@ -506,9 +509,127 @@ def run_ui() -> None:
                 else:
                     st.info("No ingestion notes yet.")
 
+        # ===== PBIX/PBIT MODEL UPLOAD SECTION =====
+        st.subheader("📊 Step 1: Upload Power BI Model (PBIX/PBIT)")
+        st.write("Upload your Power BI semantic model file to train the agent on your actual model schema.")
+        
+        pbix_file = st.file_uploader(
+            "Select a PBIX or PBIT file",
+            type=["pbix", "pbit"],
+            key="pbix_upload",
+            help="Upload your Power BI model file to extract schema, tables, relationships, and measures"
+        )
+        
+        if pbix_file is not None:
+            st.info(f"📁 Selected: {pbix_file.name}")
+            
+            if st.button("🔍 Extract & Train from PBIX Model", key="extract_pbix"):
+                with st.spinner("Extracting metadata from PBIX file..."):
+                    try:
+                        # Save uploaded file temporarily
+                        from pathlib import Path
+                        pbix_path = Path(f"/tmp/{pbix_file.name}")
+                        pbix_path.write_bytes(pbix_file.getvalue())
+                        
+                        # Import and use PBIX extractor
+                        from .pbix_extractor import PBIXExtractor
+                        
+                        # Validate file
+                        is_valid, validation_msg = PBIXExtractor.validate_pbix_file(str(pbix_path))
+                        if not is_valid:
+                            st.error(f"❌ Invalid PBIX file: {validation_msg}")
+                        else:
+                            # Extract metadata
+                            metadata = PBIXExtractor.extract_metadata(str(pbix_path))
+                            
+                            if metadata and metadata.get("tables"):
+                                # Save extracted metadata to model
+                                extracted_metadata = model_store.load_metadata(active_model["id"])
+                                
+                                # Merge with existing metadata
+                                extracted_metadata["tables"] = metadata.get("tables", {})
+                                extracted_metadata["relationships"] = metadata.get("relationships", [])
+                                extracted_metadata["measures"] = metadata.get("measures", {})
+                                
+                                # Add ingestion note
+                                notes = extracted_metadata.setdefault("ingestion_notes", [])
+                                notes.append(f"Trained on PBIX model: {pbix_file.name}")
+                                
+                                # Save updated metadata
+                                model_store.save_metadata(active_model["id"], extracted_metadata)
+                                
+                                # Get file info
+                                file_info = PBIXExtractor.get_file_info(str(pbix_path))
+                                
+                                st.success(f"✅ Successfully extracted model from {pbix_file.name}")
+                                st.write(f"**File Info:** {file_info['model_type']} model (~{file_info['size_mb']}MB)")
+                                
+                                # Show extracted schema
+                                col1, col2, col3 = st.columns(3)
+                                with col1:
+                                    st.metric("📊 Tables Found", len(metadata.get("tables", {})))
+                                with col2:
+                                    st.metric("🔗 Relationships", len(metadata.get("relationships", [])))
+                                with col3:
+                                    st.metric("📐 Measures", len(metadata.get("measures", {})))
+                                
+                                # Show extracted tables
+                                with st.expander("📋 Extracted Tables & Columns", expanded=True):
+                                    tables_data = []
+                                    for table_name, info in metadata.get("tables", {}).items():
+                                        col_count = info.get("column_count", 0)
+                                        columns = list(info.get("columns", {}).keys())
+                                        tables_data.append({
+                                            "Table": table_name,
+                                            "Columns": col_count,
+                                            "Column Names": ", ".join(columns[:5]) + ("..." if col_count > 5 else ""),
+                                        })
+                                    st.dataframe(pd.DataFrame(tables_data), use_container_width=True)
+                                
+                                # Show relationships
+                                if metadata.get("relationships"):
+                                    with st.expander("🔗 Detected Relationships", expanded=True):
+                                        rel_data = []
+                                        for rel in metadata.get("relationships", []):
+                                            rel_data.append({
+                                                "From": f"{rel.get('from_table')}.{rel.get('from_column')}",
+                                                "To": f"{rel.get('to_table')}.{rel.get('to_column')}",
+                                            })
+                                        st.dataframe(pd.DataFrame(rel_data), use_container_width=True)
+                                
+                                # Show measures
+                                if metadata.get("measures"):
+                                    with st.expander("📐 Extracted Measures", expanded=False):
+                                        for measure_name, measure_info in list(metadata.get("measures", {}).items())[:10]:
+                                            st.write(f"**{measure_name}** (in {measure_info.get('table', 'Unknown')})")
+                                            st.code(measure_info.get("expression", ""), language="sql")
+                                
+                                # Train the agent
+                                st.info("🤖 Training agent on extracted model schema...")
+                                st.session_state.agent = _build_agent_for_model(
+                                    api_key=api_key_input,
+                                    metadata=extracted_metadata,
+                                    model_id=active_model["id"],
+                                )
+                                st.session_state.agent_model_id = active_model["id"]
+                                st.success("✅ Agent trained on your PBIX model! You can now generate code for this model.")
+                                st.rerun()
+                            else:
+                                st.error("❌ Could not extract any tables from the PBIX file. File may be empty or corrupted.")
+                    
+                    except Exception as e:
+                        st.error(f"❌ Error extracting PBIX: {str(e)}")
+                        logger.error(f"PBIX extraction error: {str(e)}")
+
+        st.divider()
+        
+        # ===== CSV FILE UPLOAD SECTION (EXISTING) =====
+        st.subheader("📁 Step 2: Upload CSV Files (Optional)")
+        st.write("Upload additional CSV files for relationship detection and combined table creation.")
+        
         uploads = st.file_uploader(
-            "Upload PBIX / screenshot / metadata files",
-            type=["pbix", "pbit", "png", "jpg", "jpeg", "webp", "json", "csv", "tsv", "txt", "md"],
+            "Upload CSV files or metadata files",
+            type=["csv", "json", "pbix", "pbit", "png", "jpg", "jpeg", "webp", "txt", "md"],
             accept_multiple_files=True,
             key="model_uploads",
         )
@@ -691,23 +812,46 @@ def run_ui() -> None:
                     elif output_language == "DAX":
                         target = "semantic"
 
-                    # ENHANCED: Build detailed prompt with full schema context
+                    # ENHANCED: Build detailed prompt with full schema context and join guidance
                     schema_context = ""
                     active_metadata = model_store.load_metadata(active_model["id"])
                     if isinstance(active_metadata, dict):
                         tables = active_metadata.get("tables", {})
                         if tables:
-                            schema_context = "\n\nAvailable tables and columns:\n"
+                            schema_context = "\n\n=== SCHEMA INFORMATION ===\n"
+                            schema_context += "\nTABLE STRUCTURES:\n"
                             for table_name, info in tables.items():
                                 columns = info.get("columns", {})
                                 col_list = ", ".join(columns.keys()) if columns else "No columns"
-                                schema_context += f"- {table_name}: {col_list}\n"
+                                schema_context += f"  • {table_name}: {col_list}\n"
                         
                         relationships = active_metadata.get("relationships", [])
                         if relationships:
-                            schema_context += "\nRelationships:\n"
+                            schema_context += "\nRELATIONSHIP MAP (for joining):\n"
                             for rel in relationships:
-                                schema_context += f"- {rel.get('from_table')}.{rel.get('from_column')} -> {rel.get('to_table')}.{rel.get('to_column')}\n"
+                                from_table = rel.get('from_table', 'Unknown')
+                                from_col = rel.get('from_column', 'Unknown')
+                                to_table = rel.get('to_table', 'Unknown')
+                                to_col = rel.get('to_column', 'Unknown')
+                                # Clean column names (remove Unicode artifacts)
+                                from_col_clean = from_col.replace('\ufeff', '').strip()
+                                to_col_clean = to_col.replace('\ufeff', '').strip()
+                                schema_context += f"  • {from_table}[{from_col_clean}] joins {to_table}[{to_col_clean}]\n"
+                            
+                            schema_context += "\nJOIN PATTERNS:\n"
+                            schema_context += "  • Use LEFT JOINs to preserve all fact table records\n"
+                            schema_context += "  • Join through intermediate tables (e.g., through SalesPerson to reach SalesPersonRegion)\n"
+                            schema_context += "  • Always qualify column names: df['ColumnName'] == OtherTable['ColumnName']\n"
+                            schema_context += "  • Include clear comments for each join explaining its purpose\n"
+                        
+                        schema_context += "\n=== OUTPUT REQUIREMENTS ===\n"
+                        schema_context += "For PySpark denormalized table joins:\n"
+                        schema_context += "  1. Start with base table (Sales recommended)\n"
+                        schema_context += "  2. Join each related table using LEFT JOIN to preserve rows\n"
+                        schema_context += "  3. For multi-hop relationships, join through intermediate tables\n"
+                        schema_context += "  4. Include clear comments above each join explaining the relationship\n"
+                        schema_context += "  5. Create final temp view with meaningful name\n"
+                        schema_context += "  6. Use proper column escaping for special characters\n"
                     
                     universal_prompt = f"Create {item_type}: {description.strip()}"
                     if conditions.strip():

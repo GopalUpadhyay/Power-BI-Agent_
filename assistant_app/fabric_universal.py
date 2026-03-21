@@ -675,6 +675,7 @@ class MultiLanguageGenerationEngine:
         lines = [f"result_df = {base}"]
 
         progress = True
+        join_num = 1
         while progress:
             progress = False
             for rel in rels:
@@ -685,20 +686,47 @@ class MultiLanguageGenerationEngine:
                 if not (ft and fc and tt and tc):
                     continue
 
+                # Clean column names (remove BOM and special chars)
+                fc_clean = fc.replace('\ufeff', '').strip()
+                tc_clean = tc.replace('\ufeff', '').strip()
+                
+                relationship_desc = rel.get("name", f"{ft}→{tt}")
+
                 if ft in joined and tt not in joined:
+                    lines.append("")
+                    lines.append(f"# Join {join_num}: {tt} table")
+                    lines.append(f"# Relationship: {relationship_desc}")
                     lines.append(
-                        f"result_df = result_df.join({tt}, result_df['{fc}'] == {tt}['{tc}'], 'left')"
+                        f"result_df = result_df.join(\n"
+                        f"    {tt},\n"
+                        f"    result_df['{fc_clean}'] == {tt}['{tc_clean}'],\n"
+                        f"    'left'\n"
+                        f")"
                     )
                     joined.add(tt)
                     progress = True
+                    join_num += 1
                 elif tt in joined and ft not in joined:
+                    # Check if we can join through an intermediate table
+                    lines.append("")
+                    lines.append(f"# Join {join_num}: {ft} table (via {tt})")
+                    lines.append(f"# Relationship: {relationship_desc}")
                     lines.append(
-                        f"result_df = result_df.join({ft}, result_df['{tc}'] == {ft}['{fc}'], 'left')"
+                        f"result_df = result_df.join(\n"
+                        f"    {ft},\n"
+                        f"    {tt}['{tc_clean}'] == {ft}['{fc_clean}'],\n"
+                        f"    'left'\n"
+                        f")"
                     )
                     joined.add(ft)
                     progress = True
+                    join_num += 1
 
-        lines.append("result_df.createOrReplaceTempView('full_model_table')")
+        lines.append("")
+        lines.append("# Create final view")
+        view_name = self._extract_requested_view_name(req) or "full_model_table"
+        lines.append(f"result_df.createOrReplaceTempView('{view_name}')")
+        
         unjoined = [t for t in tables.keys() if t not in joined]
         note = ""
         if unjoined:
@@ -778,6 +806,22 @@ class MultiLanguageGenerationEngine:
         for t in tables.keys():
             if t.lower() == wanted:
                 return t
+        return None
+
+    @staticmethod
+    def _extract_requested_view_name(req: str) -> Optional[str]:
+        """Extract requested view/table name from user request."""
+        low = req.lower()
+        # Try patterns like "createOrReplaceTempView('name')" or "create view name"
+        m = re.search(r"(?:create.*view|temp.*view)\s*['\"]?([a-zA-Z_][a-zA-Z0-9_]*)['\"]?", low)
+        if not m:
+            # Try "as 'name'" pattern
+            m = re.search(r"as\s*['\"]([a-zA-Z_][a-zA-Z0-9_]*)['\"]", low)
+        if not m:
+            # Try "call it 'name'" or "name it"
+            m = re.search(r"(?:call|name)\s+(?:it\s+)?['\"]?([a-zA-Z_][a-zA-Z0-9_]*)['\"]?", low)
+        if m:
+            return m.group(1)
         return None
 
     @staticmethod
