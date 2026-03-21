@@ -899,73 +899,65 @@ def run_ui() -> None:
                             schema_context += "  5. Create final temp view with meaningful name\n"
                             schema_context += "  6. Use proper column escaping for special characters\n"
                     
-                    universal_prompt = f"Create {item_type}: {description.strip()}"
-                    if conditions.strip():
-                        universal_prompt += f" with conditions {conditions.strip()}"
-                    universal_prompt += schema_context
+                    # IMPROVED: Use intelligent FormulaCorrector for DAX formulas DIRECTLY
+                    u_result = {}
                     
-                    # Add explicit instructions for what NOT to do
-                    universal_prompt += "\n\n=== CRITICAL INSTRUCTIONS ===\n"
-                    universal_prompt += "• DO use metric patterns above as templates\n"
-                    universal_prompt += "• DO use the exact column names from the COLUMN DEFINITIONS section\n"
-                    universal_prompt += f"• DO keep the code language consistent: {output_language}\n"
-                    universal_prompt += "• DO NOT sum ID/Key columns (EmployeeKey, ProductKey, OrderID, etc)\n"
-                    universal_prompt += "• DO NOT use columns that are not listed in the schema\n"
-                    universal_prompt += "• RETURN ONLY the code, no explanation\n"
-
-                    u_result = universal_assistant.run_once(universal_prompt, target=target)
-                    st.success(f"✓ Generated {u_result.get('type', output_language)} for {usage_target}.")
-
-                    # QUALITY CHECK: Apply formula corrections for DAX measures
-                    corrected_code = u_result.get("code", "")
-                    corrections_applied = []
-                    
-                    if output_language == "DAX" and item_type in ["measure", "flag"]:
+                    if output_language == "DAX" and item_type in ["measure", "flag", "column"]:
+                        # Use intelligent semantic formula generation for DAX
                         try:
                             corrector = FormulaCorrector(active_metadata)
-                            corrected_code, warnings = corrector.correct_dax_formula(
-                                corrected_code, 
+                            formula, warnings = corrector.generate_dax_formula(
                                 description.strip(),
-                                item_name.strip(),
                                 item_type=item_type
                             )
                             
+                            u_result = {
+                                "type": "DAX",
+                                "code": formula,
+                                "explanation": f"Generated {item_type} using intelligent schema analysis: {description.strip()}",
+                                "validation": "passed" if not formula.startswith("ERROR") else "failed"
+                            }
+                            
                             if warnings:
-                                corrections_applied = warnings
-                                if corrected_code != u_result.get("code", ""):
-                                    st.warning("⚠️ **Formula Auto-Corrected**")
-                                    st.info("The generated formula had issues. We've auto-corrected it below.")
-                                    
-                                    # Show both versions for user review
-                                    col1, col2 = st.columns(2)
-                                    with col1:
-                                        st.subheader("❌ Generated (Had Issues)")
-                                        st.code(u_result.get("code", ""), language="sql")
-                                        for warning in corrections_applied:
-                                            st.warning(warning)
-                                    
-                                    with col2:
-                                        st.subheader("✅ Corrected")
-                                        st.code(corrected_code, language="sql")
-                                    
-                                    # Option to use original or corrected
-                                    use_corrected = st.radio(
-                                        "Which version would you like to use?",
-                                        ["Corrected (Recommended)", "Original"],
-                                        index=0
-                                    )
-                                    
-                                    if use_corrected == "Original":
-                                        corrected_code = u_result.get("code", "")
-                                        st.info("Using original formula as requested")
-                                    else:
-                                        st.success("Using corrected formula")
+                                st.warning("⚠️ Warnings during generation:")
+                                for w in warnings:
+                                    st.write(f"  • {w}")
+                            
+                            st.success(f"✓ Generated intelligent DAX {item_type} using semantic schema matching")
+                            
                         except Exception as e:
-                            logger.warning(f"Formula correction failed: {e}")
-                            st.warning(f"Could not auto-correct formula: {str(e)}")
+                            logger.warning(f"FormulaCorrector generation failed: {e}, falling back to universal assistant")
+                            # Fallback to universal assistant if FormulaCorrector fails
+                            universal_prompt = f"Create {item_type}: {description.strip()}"
+                            if conditions.strip():
+                                universal_prompt += f" with conditions {conditions.strip()}"
+                            universal_prompt += schema_context
+                            universal_prompt += "\n\n=== CRITICAL INSTRUCTIONS ===\n"
+                            universal_prompt += "• DO use metric patterns above as templates\n"
+                            universal_prompt += "• DO use the exact column names from the COLUMN DEFINITIONS section\n"
+                            universal_prompt += f"• DO keep the code language consistent: {output_language}\n"
+                            universal_prompt += "• DO NOT sum ID/Key columns (EmployeeKey, ProductKey, OrderID, etc)\n"
+                            universal_prompt += "• DO NOT use columns that are not listed in the schema\n"
+                            universal_prompt += "• RETURN ONLY the code, no explanation\n"
+                            u_result = universal_assistant.run_once(universal_prompt, target=target)
+                            st.success(f"✓ Generated {u_result.get('type', output_language)} for {usage_target}.")
+                    else:
+                        # For non-DAX languages, use universal assistant
+                        universal_prompt = f"Create {item_type}: {description.strip()}"
+                        if conditions.strip():
+                            universal_prompt += f" with conditions {conditions.strip()}"
+                        universal_prompt += schema_context
+                        universal_prompt += "\n\n=== CRITICAL INSTRUCTIONS ===\n"
+                        universal_prompt += "• DO use metric patterns above as templates\n"
+                        universal_prompt += "• DO use the exact column names from the COLUMN DEFINITIONS section\n"
+                        universal_prompt += f"• DO keep the code language consistent: {output_language}\n"
+                        universal_prompt += "• DO NOT create columns that are not explicitly requested\n"
+                        universal_prompt += "• DO NOT use columns that are not listed in the schema\n"
+                        universal_prompt += "• RETURN ONLY the code, no explanation\n"
+                        u_result = universal_assistant.run_once(universal_prompt, target=target)
+                        st.success(f"✓ Generated {u_result.get('type', output_language)} for {usage_target}.")
                     
-                    # Update u_result with corrected code
-                    u_result["code"] = corrected_code
+                    corrected_code = u_result.get("code", "")
 
                     # Register the generated item in the registry so it appears in Created Items
                     if u_result and u_result.get("code"):
