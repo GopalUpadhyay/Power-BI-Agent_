@@ -21,14 +21,16 @@
 ### Step 2: Set API Key
 
 ```bash
+# Get your API key from https://platform.openai.com/account/api-keys
+
 # macOS/Linux
-export OPENAI_API_KEY='sk-proj-***REMOVED***'
+export OPENAI_API_KEY='sk-proj-your-actual-api-key-here'
 
 # Windows PowerShell
-$env:OPENAI_API_KEY='sk-proj-***REMOVED***'
+$env:OPENAI_API_KEY='sk-proj-your-actual-api-key-here'
 
 # Windows Command Prompt
-set OPENAI_API_KEY= 'sk-proj-***REMOVED***'
+set OPENAI_API_KEY=sk-proj-your-actual-api-key-here
 ```
 
 ### Step 3: Open Notebook
@@ -299,14 +301,15 @@ echo %OPENAI_API_KEY%  # Windows
 **Solution:**
 
 ```bash
-export OPENAI_API_KEY='sk-proj-***REMOVED***'
+# Get your API key from https://platform.openai.com/account/api-keys
+export OPENAI_API_KEY='sk-proj-your-actual-api-key-here'
 ```
 
 **Alternative - Set in notebook:**
 
 ```python
 import os
-os.environ['OPENAI_API_KEY'] = 'sk-proj-***REMOVED***'
+os.environ['OPENAI_API_KEY'] = 'sk-proj-your-actual-api-key-here'
 ```
 
 ---

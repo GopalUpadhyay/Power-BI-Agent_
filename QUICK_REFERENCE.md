@@ -5,7 +5,8 @@
 ### 1️⃣ Set API Key
 
 ```bash
-export OPENAI_API_KEY='sk-proj-***REMOVED***'
+# Get your API key from https://platform.openai.com/account/api-keys
+export OPENAI_API_KEY='sk-proj-your-actual-api-key-here'
 ```
 
 ### 2️⃣ Open Notebook
@@ -239,7 +240,7 @@ Save? (y/n): y
 
 | Issue               | Fix                                      |
 | ------------------- | ---------------------------------------- |
-| "API key not found" | `export OPENAI_API_KEY='sk-...'`         |
+| "API key not found" | `export OPENAI_API_KEY='sk-proj-your-key'` |
 | "Table not found"   | Check Spark table names (case-sensitive) |
 | "Column not found"  | Verify column names in schema            |
 | "Invalid syntax"    | Check bracket balance in DAX             |

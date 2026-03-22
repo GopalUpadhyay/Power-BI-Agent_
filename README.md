@@ -24,7 +24,8 @@ This assistant enables business analysts and developers to:
 ### 1. Setup Environment Variables
 
 ```bash
-export OPENAI_API_KEY='sk-proj-***REMOVED***'
+# Get your API key from https://platform.openai.com/account/api-keys
+export OPENAI_API_KEY='sk-proj-your-actual-api-key-here'
 ```
 
 ### 2. Open Notebook
@@ -415,7 +416,8 @@ Integrate as LLM backend for UI
 **Solution:**
 
 ```bash
-export OPENAI_API_KEY='sk-proj-***REMOVED***'
+# Get your API key from https://platform.openai.com/account/api-keys
+export OPENAI_API_KEY='sk-proj-your-actual-api-key-here'
 ```
 
 ### Problem: "Column not found"
