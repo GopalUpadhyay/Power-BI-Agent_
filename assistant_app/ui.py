@@ -162,12 +162,12 @@ def run_ui() -> None:
             background-color: #1a1a1a;
         }
         
-        /* Sidebar styling - all elements */
+        /* Sidebar styling - DARK background like local version */
         [data-testid="stSidebar"] {
-            background-color: #C1272D !important;
+            background-color: #262626 !important;
         }
         
-        /* Sidebar text, labels, and headers */
+        /* Sidebar text, labels, and headers - ALL WHITE */
         [data-testid="stSidebar"] h1,
         [data-testid="stSidebar"] h2,
         [data-testid="stSidebar"] h3,
@@ -175,24 +175,21 @@ def run_ui() -> None:
         [data-testid="stSidebar"] label,
         [data-testid="stSidebar"] p,
         [data-testid="stSidebar"] span,
-        [data-testid="stSidebar"] div {
+        [data-testid="stSidebar"] div,
+        [data-testid="stSidebar"] .stTextInput label,
+        [data-testid="stSidebar"] .stSelectbox label,
+        [data-testid="stSidebar"] .stCheckbox label,
+        [data-testid="stSidebar"] .stRadio label {
             color: #FFFFFF !important;
         }
         
-        /* Sidebar input fields */
+        /* Sidebar input fields - darker background */
         [data-testid="stSidebar"] .stTextInput input,
         [data-testid="stSidebar"] .stNumberInput input,
-        [data-testid="stSidebar"] .stSelectbox select,
-        [data-testid="stSidebar"] [data-testid="stSelectbox"] {
-            background-color: #2d2d2d !important;
+        [data-testid="stSidebar"] input {
+            background-color: #1a1a1a !important;
             color: #FFFFFF !important;
             border-color: #444 !important;
-        }
-        
-        /* Sidebar text input */
-        [data-testid="stSidebar"] input {
-            background-color: #2d2d2d !important;
-            color: #FFFFFF !important;
             border: 1px solid #444 !important;
         }
         
@@ -201,12 +198,14 @@ def run_ui() -> None:
         }
         
         /* Sidebar select dropdown */
-        [data-testid="stSidebar"] select {
-            background-color: #2d2d2d !important;
+        [data-testid="stSidebar"] select,
+        [data-testid="stSidebar"] .stSelectbox select {
+            background-color: #1a1a1a !important;
             color: #FFFFFF !important;
+            border: 1px solid #444 !important;
         }
         
-        /* Sidebar buttons */
+        /* Sidebar buttons - orange with dark theme */
         [data-testid="stSidebar"] .stButton > button {
             background-color: #FF6B35 !important;
             color: #FFFFFF !important;
@@ -227,14 +226,19 @@ def run_ui() -> None:
             color: #FFFFFF !important;
         }
         
+        [data-testid="stSidebar"] .stCheckbox {
+            color: #FFFFFF !important;
+        }
+        
         /* Sidebar divider */
         [data-testid="stSidebar"] hr {
-            border-color: #999 !important;
+            border-color: #444 !important;
         }
         
         /* Main content area */
         .stApp {
             background-color: #1a1a1a;
+            color: #E0E0E0;
         }
         
         /* Button styling - main area */
