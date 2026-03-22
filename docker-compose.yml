@@ -1,0 +1,34 @@
+version: '3.8'
+
+services:
+  streamlit_app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: ai-bot-streamlit
+    ports:
+      - "8501:8501"
+    environment:
+      - AI_BOT_MAQ_OPENAI_API_KEY=${AI_BOT_MAQ_OPENAI_API_KEY}
+      - STREAMLIT_SERVER_HEADLESS=true
+      - STREAMLIT_THEME_BASE=dark
+      - STREAMLIT_THEME_PRIMARY_COLOR=#FF6B35
+      - STREAMLIT_THEME_BACKGROUND_COLOR=#1a1a1a
+      - STREAMLIT_THEME_SECONDARY_BACKGROUND_COLOR=#262626
+      - STREAMLIT_THEME_TEXT_COLOR=#FFFFFF
+    volumes:
+      - ./.streamlit:/home/appuser/.streamlit
+      - ./assistant_app:/app/assistant_app
+      - ./streamlit_app.py:/app/streamlit_app.py
+    command: streamlit run /app/streamlit_app.py --logger.level=info
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8501/_stcore/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+
+volumes:
+  streamlit_data:
+    driver: local

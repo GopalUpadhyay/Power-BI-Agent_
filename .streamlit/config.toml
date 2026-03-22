@@ -10,6 +10,7 @@ font = "sans serif"
 showErrorDetails = true
 toolbarMode = "viewer"
 theme = "dark"
+showSidebarNavigation = false
 
 [logger]
 level = "info"
@@ -20,7 +21,28 @@ port = 8501
 enableCORS = false
 enableXsrfProtection = true
 maxUploadSize = 200
+maxMessageSize = 200
 
 [ui]
 hideTopBar = false
 hideFooter = false
+hideSidebarNav = false
+
+[deprecation]
+showPyplotGlobalUse = false
+
+[client.toolbarMode]
+value = "viewer"
+
+[browser]
+gatherUsageStats = false
+serverAddress = "localhost"
+
+[global]
+dataFrameSerialization = "arrow"
+minCacheEntrySize = 0
+maxMessageSize = 200
+
+[runner]
+magicEnabled = true
+fastReruns = true

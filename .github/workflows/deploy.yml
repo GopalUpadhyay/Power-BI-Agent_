@@ -1,0 +1,128 @@
+name: CI/CD - Build and Deploy to Streamlit Cloud
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+  workflow_dispatch:
+
+env:
+  PYTHON_VERSION: "3.10"
+
+jobs:
+  test:
+    name: Test and Validate
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: "pip"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install pytest pytest-cov flake8
+
+      - name: Lint with flake8
+        run: |
+          # Stop the build if there are Python syntax errors or undefined names
+          flake8 assistant_app/ --count --select=E9,F63,F7,F82 --show-source --statistics
+          # Exit-zero treats all errors as warnings
+          flake8 assistant_app/ --count --exit-zero --max-complexity=10 --max-line-length=127 --statistics
+
+      - name: Run unit tests
+        run: |
+          if [ -f comprehensive_app_tests.py ]; then
+            python -m pytest comprehensive_app_tests.py -v --tb=short
+          fi
+          if [ -f automated_qa_tests.py ]; then
+            python -m pytest automated_qa_tests.py -v --tb=short
+          fi
+
+      - name: Validate configuration files
+        run: |
+          python -c "import toml; toml.load('.streamlit/config.toml'); print('✓ config.toml is valid')"
+          
+      - name: Check for API keys in code
+        run: |
+          # Prevent commits with API keys
+          ! grep -r "sk-proj-\|sk-" assistant_app/ --include="*.py" 2>/dev/null || \
+            (echo "❌ Found API keys in code!" && exit 1)
+          echo "✓ No hardcoded API keys found"
+
+  deploy:
+    name: Deploy to Streamlit Cloud
+    needs: test
+    runs-on: ubuntu-latest
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Validate deployment files exist
+        run: |
+          [ -f streamlit_app.py ] || (echo "❌ streamlit_app.py not found!" && exit 1)
+          [ -f .streamlit/config.toml ] || (echo "❌ .streamlit/config.toml not found!" && exit 1)
+          [ -f requirements.txt ] || (echo "❌ requirements.txt not found!" && exit 1)
+          echo "✓ All deployment files validated"
+
+      - name: Notify deployment started
+        run: |
+          echo "🚀 Deploying to Streamlit Cloud..."
+          echo "Commit: ${{ github.sha }}"
+          echo "Branch: ${{ github.ref }}"
+
+      - name: Deploy via Git Push
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          # Streamlit Cloud auto-deploys on git push to main
+          git log --oneline -5
+          echo "✓ Code pushed. Streamlit Cloud will auto-deploy."
+
+      - name: Wait for deployment
+        run: |
+          echo "⏳ Waiting for Streamlit Cloud to detect changes..."
+          sleep 5
+          echo "Check your Streamlit Cloud dashboard for deployment status"
+
+  notify:
+    name: Notify deployment status
+    needs: deploy
+    runs-on: ubuntu-latest
+    if: always()
+    
+    steps:
+      - name: Check deployment status
+        run: |
+          if [ "${{ needs.deploy.result }}" = "success" ]; then
+            echo "✅ Deployment successful!"
+            echo "Your app will be live on Streamlit Cloud shortly."
+            echo "Visit: https://huggingface.co/spaces/your-app-name"
+          else
+            echo "❌ Deployment failed. Check logs above."
+            exit 1
+          fi
+
+      - name: Create deployment summary
+        if: always()
+        run: |
+          echo "## 📊 Deployment Summary" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "- **Commit:** ${{ github.sha }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Branch:** ${{ github.ref }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Author:** ${{ github.actor }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Status:** ${{ needs.deploy.result }}" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**Action:** View your app on [Streamlit Cloud](https://share.streamlit.io)" >> $GITHUB_STEP_SUMMARY
