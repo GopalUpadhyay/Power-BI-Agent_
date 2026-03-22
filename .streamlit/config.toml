@@ -11,6 +11,7 @@ showErrorDetails = true
 toolbarMode = "viewer"
 theme = "dark"
 showSidebarNavigation = false
+showRunMargin = true
 
 [logger]
 level = "info"
@@ -22,6 +23,7 @@ enableCORS = false
 enableXsrfProtection = true
 maxUploadSize = 200
 maxMessageSize = 200
+runOnSave = false
 
 [ui]
 hideTopBar = false
@@ -42,7 +44,14 @@ serverAddress = "localhost"
 dataFrameSerialization = "arrow"
 minCacheEntrySize = 0
 maxMessageSize = 200
+suppressDeprecationWarnings = true
 
 [runner]
 magicEnabled = true
 fastReruns = true
+
+[client.showErrorDetails]
+value = true
+
+[logger.datetimeFormat]
+value = "%Y-%m-%d %H:%M:%S"

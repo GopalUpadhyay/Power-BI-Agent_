@@ -150,6 +150,12 @@ def run_ui() -> None:
     st.markdown(
         """
         <style>
+        /* Root HTML and body - ensure continuous styling */
+        html, body {
+            margin: 0;
+            padding: 0;
+        }
+        
         /* Main theme colors */
         :root {
             --primary-color: #FF6B35;
@@ -157,13 +163,25 @@ def run_ui() -> None:
             --danger-color: #C1272D;
         }
         
-        /* Dark theme background */
+        /* Streamlit app container - continuous background */
         .stApp {
             background-color: #1a1a1a;
+            color: #E0E0E0;
+        }
+        
+        /* Main content area - ensure no gaps */
+        .main {
+            background-color: #1a1a1a;
+            padding: 0;
         }
         
         /* Sidebar styling - DARK background like local version */
         [data-testid="stSidebar"] {
+            background-color: #262626 !important;
+        }
+        
+        /* Sidebar section - proper padding */
+        [data-testid="stSidebar"] section {
             background-color: #262626 !important;
         }
         
@@ -172,6 +190,8 @@ def run_ui() -> None:
         [data-testid="stSidebar"] h2,
         [data-testid="stSidebar"] h3,
         [data-testid="stSidebar"] h4,
+        [data-testid="stSidebar"] h5,
+        [data-testid="stSidebar"] h6,
         [data-testid="stSidebar"] label,
         [data-testid="stSidebar"] p,
         [data-testid="stSidebar"] span,
@@ -186,6 +206,7 @@ def run_ui() -> None:
         /* Sidebar input fields - darker background */
         [data-testid="stSidebar"] .stTextInput input,
         [data-testid="stSidebar"] .stNumberInput input,
+        [data-testid="stSidebar"] .stSelectbox,
         [data-testid="stSidebar"] input {
             background-color: #1a1a1a !important;
             color: #FFFFFF !important;
@@ -213,11 +234,13 @@ def run_ui() -> None:
             border-radius: 4px !important;
             font-weight: bold !important;
             width: 100% !important;
+            padding: 0.5rem 1rem !important;
         }
         
         [data-testid="stSidebar"] .stButton > button:hover {
             background-color: #F7931E !important;
             color: #FFFFFF !important;
+            transform: translateY(-2px);
         }
         
         /* Sidebar checkboxes and radio buttons */
@@ -235,34 +258,29 @@ def run_ui() -> None:
             border-color: #444 !important;
         }
         
-        /* Main content area */
-        .stApp {
-            background-color: #1a1a1a;
-            color: #E0E0E0;
-        }
-        
-        /* Button styling - main area */
+        /* Main content area - button styling */
         .stButton > button {
-            background-color: #FF6B35;
-            color: white;
-            border: none;
-            border-radius: 4px;
-            font-weight: bold;
+            background-color: #FF6B35 !important;
+            color: white !important;
+            border: none !important;
+            border-radius: 4px !important;
+            font-weight: bold !important;
+            padding: 0.5rem 1rem !important;
         }
         
         .stButton > button:hover {
-            background-color: #F7931E;
-            color: white;
+            background-color: #F7931E !important;
+            color: white !important;
         }
         
         /* Title and header styling */
-        h1, h2, h3 {
-            color: #FF6B35;
+        h1, h2, h3, h4, h5, h6 {
+            color: #FF6B35 !important;
         }
         
         /* Main content text color */
-        p, span, label, div {
-            color: #E0E0E0;
+        p, span, label {
+            color: #E0E0E0 !important;
         }
         
         /* Input field styling - main area */
@@ -275,22 +293,79 @@ def run_ui() -> None:
         select {
             background-color: #2d2d2d !important;
             color: #FFFFFF !important;
+            border-color: #444 !important;
         }
         
         /* Tab styling */
+        [data-testid="stTabs"] {
+            background-color: transparent !important;
+        }
+        
         .stTabs > button {
-            color: #FAFBFC;
+            color: #FAFBFC !important;
+            background-color: transparent !important;
         }
         
         .stTabs > button[aria-selected="true"] {
-            color: #FF6B35;
-            border-bottom-color: #FF6B35;
+            color: #FF6B35 !important;
+            border-bottom-color: #FF6B35 !important;
+            background-color: transparent !important;
+        }
+        
+        /* Metric containers */
+        [data-testid="metric-container"] {
+            background-color: #2d2d2d !important;
+            border-radius: 8px !important;
+            padding: 1rem !important;
         }
         
         /* Cards and containers */
-        .stCard, [data-testid="stVerticalBlock"] {
-            background-color: #2d2d2d;
-            border-color: #444;
+        .stCard {
+            background-color: #2d2d2d !important;
+            border-color: #444 !important;
+            border-radius: 8px !important;
+        }
+        
+        [data-testid="stVerticalBlock"] {
+            background-color: #2d2d2d !important;
+            border-color: #444 !important;
+        }
+        
+        /* Column styling */
+        [data-testid="column"] {
+            background-color: transparent !important;
+        }
+        
+        /* Expandable sections */
+        .streamlit-expanderHeader {
+            background-color: #2d2d2d !important;
+            color: #FFFFFF !important;
+        }
+        
+        /* Subheader styling */
+        .stSubheader {
+            color: #FF6B35 !important;
+        }
+        
+        /* Form styling */
+        .stForm {
+            border: 1px solid #444 !important;
+            border-radius: 8px !important;
+            padding: 1rem !important;
+            background-color: #262626 !important;
+        }
+        
+        /* Overall layout continuity - remove any gaps */
+        #root, [role="main"] {
+            background-color: #1a1a1a !important;
+        }
+        
+        /* Ensure full height */
+        html, body, #root {
+            height: 100%;
+            width: 100%;
+            margin: 0;
+            padding: 0;
         }
         </style>
         """,
