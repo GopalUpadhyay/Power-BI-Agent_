@@ -10,9 +10,9 @@ from typing import Any, Dict, List, Optional, Tuple
 from dotenv import load_dotenv
 
 try:
-    from openai import OpenAI
+    from groq import Groq
 except Exception:  # pragma: no cover
-    OpenAI = None
+    Groq = None
 
 logger = logging.getLogger(__name__)
 
@@ -21,24 +21,39 @@ load_dotenv()
 
 
 def configure_openai_client(api_key: Optional[str] = None):
-    """Create OpenAI client from argument or OPENAI_API_KEY env var."""
-    resolved_key = api_key or os.getenv("OPENAI_API_KEY")
+    """Create Groq client from argument or GROQ_API_KEY env var.
+
+    Kept function name for backward compatibility with existing imports.
+    """
+    resolved_key = api_key or os.getenv("GROQ_API_KEY")
     if not resolved_key:
-        logger.warning("OPENAI_API_KEY not found. Running in fallback mode.")
+        logger.warning("GROQ_API_KEY not found. Running in fallback mode.")
         return None
 
-    if OpenAI is None:
-        logger.warning("OpenAI package is unavailable. Running in fallback mode.")
+    if Groq is None:
+        logger.warning("Groq package is unavailable. Running in fallback mode.")
         return None
 
     try:
         # Keep retries low so quota/auth failures fail fast and fallback is immediate.
-        client = OpenAI(api_key=resolved_key, max_retries=0, timeout=20.0)
-        logger.info("OpenAI client configured")
+        client = Groq(api_key=resolved_key, timeout=20.0)
+        logger.info("Groq client configured")
         return client
     except Exception as exc:  # pragma: no cover
-        logger.warning("OpenAI client configuration failed: %s", exc)
+        logger.warning("Groq client configuration failed: %s", exc)
         return None
+
+
+def _groq_model_candidates() -> List[str]:
+    primary = os.getenv("GROQ_MODEL", "llama-3.3-70b-versatile").strip()
+    fallback_env = os.getenv("GROQ_FALLBACK_MODELS", "llama-3.1-8b-instant").strip()
+    fallbacks = [m.strip() for m in fallback_env.split(",") if m.strip()]
+
+    models: List[str] = []
+    for model in [primary, *fallbacks]:
+        if model and model not in models:
+            models.append(model)
+    return models
 
 
 class SparkDataLoader:
@@ -374,7 +389,7 @@ class AIContextBuilder:
 
 
 class DAXGenerationEngine:
-    """Generates model-safe DAX using OpenAI with fallback logic."""
+    """Generates model-safe DAX using Groq with fallback logic."""
 
     def __init__(self, client, context_builder: AIContextBuilder):
         self.client = client
@@ -392,18 +407,35 @@ class DAXGenerationEngine:
         )
 
         try:
-            response = self.client.chat.completions.create(
-                model="gpt-4o-mini",
-                messages=[
-                    {
-                        "role": "system",
-                        "content": "You are a Power BI developer. Produce strict formatted output.",
-                    },
-                    {"role": "user", "content": prompt},
-                ],
-                temperature=0.2,
-                max_tokens=700,
-            )
+            response = None
+            last_error: Optional[Exception] = None
+            for model_name in _groq_model_candidates():
+                try:
+                    response = self.client.chat.completions.create(
+                        model=model_name,
+                        messages=[
+                            {
+                                "role": "system",
+                                "content": "You are a Power BI developer. Produce strict formatted output.",
+                            },
+                            {"role": "user", "content": prompt},
+                        ],
+                        temperature=0.2,
+                        max_tokens=700,
+                    )
+                    break
+                except Exception as model_exc:
+                    last_error = model_exc
+                    lowered_model = str(model_exc).lower()
+                    if any(k in lowered_model for k in ["model_decommissioned", "does not exist", "not supported"]):
+                        continue
+                    raise
+
+            if response is None:
+                if last_error is not None:
+                    raise last_error
+                raise RuntimeError("No Groq response produced.")
+
             text = response.choices[0].message.content or ""
             parsed = self._parse_response(text)
             if not parsed["expression"]:
@@ -418,10 +450,10 @@ class DAXGenerationEngine:
                 if not self._disabled_client_reason:
                     self._disabled_client_reason = "quota/auth error"
                     logger.warning(
-                        "OpenAI disabled for this run due to quota/auth error. Falling back to rule-based generation."
+                        "Groq disabled for this run due to quota/auth error. Falling back to rule-based generation."
                     )
             else:
-                logger.warning("OpenAI generation failed (%s). Using fallback.", exc)
+                logger.warning("Groq generation failed (%s). Using fallback.", exc)
             return self._fallback(item_type=item_type, description=description, conditions=conditions)
 
     @staticmethod

@@ -16,9 +16,9 @@ except Exception:  # pragma: no cover
     pd = None
 
 try:
-    from openai import OpenAI
+    from groq import Groq
 except Exception:  # pragma: no cover
-    OpenAI = None
+    Groq = None
 
 
 load_dotenv()
@@ -43,15 +43,41 @@ def _safe_col(raw: str) -> str:
     return text.strip("_") or "column"
 
 
-def configure_openai_client(api_key: Optional[str] = None):
-    resolved = api_key or os.getenv("OPENAI_API_KEY")
-    if not resolved or OpenAI is None:
+def configure_groq_client(api_key: Optional[str] = None):
+    resolved = api_key or os.getenv("GROQ_API_KEY")
+    if not resolved or Groq is None:
         return None
     try:
-        return OpenAI(api_key=resolved, max_retries=0, timeout=20.0)
+        return Groq(api_key=resolved, timeout=20.0)
     except Exception as exc:  # pragma: no cover
-        logger.warning("OpenAI init failed, fallback mode: %s", exc)
+        logger.warning("Groq init failed, fallback mode: %s", exc)
         return None
+
+
+def configure_openai_client(api_key: Optional[str] = None):
+    """Backward-compatible alias used by existing imports.
+
+    The runtime now prefers Groq, but several modules still import this symbol.
+    """
+    return configure_groq_client(api_key=api_key)
+
+
+def _groq_model_candidates() -> List[str]:
+    """Return preferred Groq models with safe fallbacks.
+
+    Configure with:
+    - GROQ_MODEL: primary model
+    - GROQ_FALLBACK_MODELS: comma-separated fallback list
+    """
+    primary = os.getenv("GROQ_MODEL", "llama-3.3-70b-versatile").strip()
+    fallback_env = os.getenv("GROQ_FALLBACK_MODELS", "llama-3.1-8b-instant").strip()
+    fallbacks = [m.strip() for m in fallback_env.split(",") if m.strip()]
+
+    models: List[str] = []
+    for model in [primary, *fallbacks]:
+        if model and model not in models:
+            models.append(model)
+    return models
 
 
 class MetadataStore:
@@ -271,20 +297,112 @@ class ContextBuilder:
         self.metadata = metadata
 
     def build_context(self) -> str:
-        lines = ["Fabric Model Context", "===================="]
-        lines.append("Tables:")
-        for t, info in self.metadata.get("tables", {}).items():
-            cols = info.get("columns", {})
-            lines.append(f"- {t}: {', '.join(cols.keys())}")
-        lines.append("Relationships:")
-        for r in self.metadata.get("relationships", []):
-            lines.append(
-                f"- {r.get('from_table')}.{r.get('from_column')} -> {r.get('to_table')}.{r.get('to_column')}"
-            )
-        lines.append("Existing measures:")
-        for n, m in self.metadata.get("measures", {}).items():
-            lines.append(f"- {n}: {m.get('expression', '')}")
+        """Build comprehensive context for Groq - detailed and structured."""
+        lines = []
+        lines.append("=" * 80)
+        lines.append("POWER BI / MICROSOFT FABRIC MODEL CONTEXT")
+        lines.append("=" * 80)
+        
+        # TABLES SECTION - Detailed
+        lines.append("\n📊 TABLES AND COLUMNS:")
+        lines.append("-" * 80)
+        tables = self.metadata.get("tables", {})
+        if not tables:
+            lines.append("⚠️  No tables defined in the model")
+        else:
+            for table_name, info in tables.items():
+                columns = info.get("columns", {})
+                col_count = len(columns)
+                lines.append(f"\n🔷 Table: {table_name} ({col_count} columns)")
+                lines.append("  " + "─" * 76)
+                
+                if not columns:
+                    lines.append("  ⚠️  No columns defined")
+                else:
+                    for col_name, col_type in sorted(columns.items()):
+                        lines.append(f"    • {col_name:<40} → {col_type}")
+        
+        # RELATIONSHIPS SECTION
+        lines.append("\n\n🔗 RELATIONSHIPS (Table Joins/Foreign Keys):")
+        lines.append("-" * 80)
+        relationships = self.metadata.get("relationships", [])
+        if not relationships:
+            lines.append("⚠️  No relationships defined")
+        else:
+            for rel in relationships:
+                from_t = rel.get("from_table", "?")
+                from_c = rel.get("from_column", "?")
+                to_t = rel.get("to_table", "?")
+                to_c = rel.get("to_column", "?")
+                rel_name = rel.get("name", f"{from_t}_{to_t}")
+                lines.append(f"\n  🔗 {rel_name}")
+                lines.append(f"     {from_t}.{from_c} ════→ {to_t}.{to_c}")
+        
+        # MEASURES SECTION
+        lines.append("\n\n📐 EXISTING MEASURES (Calculated Metrics):")
+        lines.append("-" * 80)
+        measures = self.metadata.get("measures", {})
+        if not measures:
+            lines.append("⚠️  No measures defined (you can create new ones)")
+        else:
+            for measure_name, measure_info in measures.items():
+                expr = measure_info.get("expression", "")
+                table = measure_info.get("table", "Unknown")
+                lines.append(f"\n  📊 {measure_name} (in {table})")
+                lines.append(f"     Expression: {expr}")
+        
+        # CALCULATED COLUMNS SECTION
+        lines.append("\n\n⚙️  CALCULATED COLUMNS:")
+        lines.append("-" * 80)
+        calc_cols = self.metadata.get("calculated_columns", {})
+        if not calc_cols:
+            lines.append("⚠️  No calculated columns defined")
+        else:
+            for col_name, col_info in calc_cols.items():
+                expr = col_info.get("expression", "")
+                table = col_info.get("table", "Unknown")
+                lines.append(f"\n  ⚙️  {col_name} (in {table})")
+                lines.append(f"     Expression: {expr}")
+        
+        # CALCULATED TABLES SECTION
+        lines.append("\n\n📋 CALCULATED TABLES:")
+        lines.append("-" * 80)
+        calc_tables = self.metadata.get("calculated_tables", {})
+        if not calc_tables:
+            lines.append("⚠️  No calculated tables defined")
+        else:
+            for table_name, table_info in calc_tables.items():
+                expr = table_info.get("expression", "")
+                lines.append(f"\n  📋 {table_name}")
+                lines.append(f"     Expression: {expr}")
+        
+        lines.append("\n" + "=" * 80)
+        lines.append("END OF MODEL CONTEXT")
+        lines.append("=" * 80)
+        
         return "\n".join(lines)
+    
+    def get_model_summary(self) -> Dict[str, Any]:
+        """Return a machine-readable summary for UI display."""
+        tables = self.metadata.get("tables", {})
+        relationships = self.metadata.get("relationships", [])
+        measures = self.metadata.get("measures", {})
+        calc_cols = self.metadata.get("calculated_columns", {})
+        calc_tables = self.metadata.get("calculated_tables", {})
+        
+        total_columns = sum(len(t.get("columns", {})) for t in tables.values())
+        
+        return {
+            "table_count": len(tables),
+            "total_columns": total_columns,
+            "relationship_count": len(relationships),
+            "measure_count": len(measures),
+            "calculated_column_count": len(calc_cols),
+            "calculated_table_count": len(calc_tables),
+            "tables": {name: list(info.get("columns", {}).keys()) for name, info in tables.items()},
+            "relationships": relationships,
+            "measures": {name: info.get("expression", "") for name, info in measures.items()},
+        }
 
 
 class IntentDetectionEngine:
@@ -379,54 +497,349 @@ class MultiLanguageGenerationEngine:
         self.context_builder = context_builder
         self.metadata = context_builder.metadata
 
-    def generate_code(self, intent: Dict[str, Any]) -> Dict[str, str]:
+    def build_generation_packet(self, intent: Dict[str, Any], user_params: Dict[str, Any]) -> str:
+        """Build a comprehensive input packet with all context and parameters for Groq.
+        
+        This packet includes:
+        - Full model context (tables, columns, relationships)
+        - User parameters (item type, language, usage, name, description, conditions)
+        - Requirements and validation rules
+        
+        This ensures every generation has complete information.
+        """
+        # Get model context
+        context = self.context_builder.build_context()
+        summary = self.context_builder.get_model_summary()
+        
+        # Extract user parameters
+        item_type = user_params.get("item_type", "unknown")
+        output_language = user_params.get("output_language", "unknown")
+        usage_target = user_params.get("usage_target", "unknown")
+        item_name = user_params.get("item_name", "")
+        description = user_params.get("description", "")
+        conditions = user_params.get("conditions", "")
+        
+        # Build the comprehensive packet
+        packet = f"""
+╔════════════════════════════════════════════════════════════════════════════════════════════════════╗
+║                          🧠 COMPREHENSIVE CODE GENERATION PACKET                                  ║
+╚════════════════════════════════════════════════════════════════════════════════════════════════════╝
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+📊 PART 1: GROQ CONTEXT (CURRENT MODEL INFORMATION)
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+{context}
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+⚙️  PART 2: MODEL SUMMARY
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+📈 SCHEMA STATISTICS:
+  • Total Tables: {summary.get('table_count', 0)}
+  • Total Columns: {summary.get('total_columns', 0)}
+  • Relationships: {summary.get('relationship_count', 0)}
+  • Predefined Measures: {summary.get('measure_count', 0)}
+  • Calculated Columns: {summary.get('calculated_column_count', 0)}
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+👤 PART 3: USER REQUEST PARAMETERS (WHAT USER WANTS)
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+📌 GENERATION CONFIGURATION:
+  • Item Type: {item_type}
+  • Output Language: {output_language}
+  • Usage Target: {usage_target}
+  • Item Name: {item_name!r}
+  • Description: {description!r}
+{f'  • Conditions: {conditions!r}' if conditions else '  • Conditions: (none)'}
+
+🎯 USER INTENT:
+  {intent.get('raw', 'Unknown')}
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+✅ PART 4: STRICT REQUIREMENTS (WHAT GROQ MUST DO)
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+🔒 MANDATORY RULES (DO NOT BREAK):
+  1. ✓ Use ONLY tables shown in PART 1 schema
+  2. ✓ Use ONLY columns shown for each table in PART 1
+  3. ✓ Match user intent from PART 3 exactly
+  4. ✓ Use user-provided item name: "{item_name}"
+  5. ✓ Generate code for: {output_language}
+  6. ✓ Code will be used in: {usage_target}
+  7. ✓ NEVER invent, assume, or hallucinate any tables/columns
+  8. ✓ Code must address the description: "{description}"
+  {'✓ Code must satisfy condition: ' + conditions if conditions else ''}
+  9. ✓ Provide output in exact format specified below
+
+📍 AVAILABLE TABLES TO USE:
+  {', '.join(summary.get('tables', {}).keys()) if summary.get('tables') else 'NONE - Schema is empty!'}
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+📝 PART 5: OUTPUT FORMAT (REQUIRED)
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+Return EXACTLY in this format:
+
+TYPE: <{output_language}>
+CODE: <complete, working code that uses tables from line 'AVAILABLE TABLES' above>
+EXPLANATION: <explain what this code does, which tables/columns it uses, and how it matches the intent>
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+Generate code NOW using only the schema and parameters above:
+"""
+        return packet
+
+    def generate_code(self, intent: Dict[str, Any], user_params: Dict[str, Any] = None) -> Dict[str, str]:
         # Default to deterministic, schema-driven generation unless explicitly enabled.
         use_llm = os.getenv("FABRIC_ASSISTANT_USE_LLM", "0") == "1"
+        
+        # DEBUG: log what's happening
+        print(f"🔵 generate_code: use_llm={use_llm}, client={self.client is not None}, has user_params={user_params is not None}", flush=True)
+        
         if use_llm and self.client is not None:
+            # Build comprehensive packet if user params provided
+            if user_params:
+                intent["_packet"] = self.build_generation_packet(intent, user_params)
             generated = self._generate_with_llm(intent)
             if generated:
+                print(f"🟢 LLM generated result: type={generated.get('type')}", flush=True)
                 return generated
+            else:
+                print("🔴 LLM returned None, falling back", flush=True)
+        else:
+            print(f"🟡 Skipping LLM: use_llm={use_llm}, client_ready={self.client is not None}", flush=True)
+        
         return self._fallback(intent)
 
+    def _validate_code_against_schema(self, code: str, intent: Dict[str, Any]) -> tuple[bool, str]:
+        """Validate that generated code references only tables and columns that exist in the schema.
+        
+        Returns: (is_valid, error_message)
+        """
+        if not code or not code.strip():
+            return False, "Generated code is empty"
+        
+        tables = self.context_builder.metadata.get("tables", {})
+        if not tables:
+            return False, "No tables defined in schema"
+        
+        # Extract table and column names from code
+        code_lower = code.lower()
+        all_tables = {t.lower(): t for t in tables.keys()}
+        
+        # Check if code references valid tables
+        referenced_tables = []
+        for table_lower, table_actual in all_tables.items():
+            if table_lower in code_lower or f"[{table_actual}]" in code or f"{table_actual}[" in code:
+                referenced_tables.append(table_actual)
+        
+        # If no tables referenced at all, that's suspicious
+        if not referenced_tables and tables:
+            return False, f"Generated code doesn't reference any tables. Available tables: {', '.join(tables.keys())}"
+        
+        # Validate referenced tables are in schema
+        for ref_table in referenced_tables:
+            if ref_table not in tables:
+                return False, f"Generated code references table '{ref_table}' which doesn't exist in schema. Available: {', '.join(tables.keys())}"
+            
+            # Check columns in this table
+            available_cols = list(tables[ref_table].get("columns", {}).keys())
+            if not available_cols:
+                return False, f"Table '{ref_table}' has no columns defined in schema"
+        
+        # Check intent alignment
+        intent_keywords = intent.get("raw", "").lower().split()
+        code_content = code.lower()
+        
+        # Basic alignment check - at least some keywords should appear in code comments or structure
+        if any(k in ["sum", "total", "aggregate", "avg", "count", "measure"] for k in intent_keywords):
+            if not any(kw in code_content for kw in ["sum", "avg", "average", "count", "calculate", "distinctcount", "divide"]):
+                return False, f"Intent mentions aggregation but generated code doesn't use aggregation functions"
+        
+        return True, ""
+    
     def _generate_with_llm(self, intent: Dict[str, Any]) -> Optional[Dict[str, str]]:
         try:
-            prompt = (
-                f"Context:\n{self.context_builder.build_context()}\n\n"
-                f"Request: {intent['raw']}\n"
-                f"Output type: {intent['output_type']}\n"
-                "Return strict format:\n"
-                "TYPE: <DAX|SQL|PySpark|Python>\n"
-                "CODE: <code>\n"
-                "EXPLANATION: <simple explanation>\n"
-            )
-            res = self.client.chat.completions.create(
-                model="gpt-4o-mini",
-                temperature=0.1,
-                max_tokens=600,
-                messages=[
-                    {"role": "system", "content": "You are a Microsoft Fabric multi-language assistant."},
-                    {"role": "user", "content": prompt},
-                ],
-            )
-            text = res.choices[0].message.content or ""
-            t = _extract_field(text, "TYPE")
-            c = _extract_block(text, "CODE", "EXPLANATION")
-            e = _extract_field(text, "EXPLANATION")
+            # Check if comprehensive packet exists (built by build_generation_packet)
+            if "_packet" in intent:
+                # Use the comprehensive packet with all context and parameters
+                prompt = intent["_packet"]
+            else:
+                # Fall back to building prompt from context (legacy path)
+                comprehensive_context = self.context_builder.build_context()
+                metadata = self.context_builder.metadata
+                tables = metadata.get("tables", {})
+                relationships = metadata.get("relationships", [])
+                
+                table_list = ", ".join(tables.keys()) if tables else "NO TABLES"
+                rel_list = ""
+                if relationships:
+                    rel_list = "\n".join([f"  • {r.get('from_table')}.{r.get('from_column')} → {r.get('to_table')}.{r.get('to_column')}" for r in relationships[:5]])
+                
+                prompt = (
+                    f"{comprehensive_context}\n\n"
+                    f"═══════════════════════════════════════════════════════════════════════════════════\n"
+                    f"USER REQUEST (MUST GENERATE CODE MATCHING THIS):\n"
+                    f"═══════════════════════════════════════════════════════════════════════════════════\n"
+                    f"Question: {intent['raw']}\n"
+                    f"Requested Output Type: {intent['output_type']}\n"
+                    f"═══════════════════════════════════════════════════════════════════════════════════\n\n"
+                    f"STRICT VALIDATION REQUIREMENTS:\n"
+                    f"──────────────────────────────────────────────────────────────────────────────────\n"
+                    f"✓ ONLY use these tables: {table_list}\n"
+                    f"✓ ONLY use columns that exist in these tables (shown in schema above)\n"
+                    f"✓ ONLY use these relationships for joins:\n{rel_list if rel_list else '  (none defined)'}\n"
+                    f"✓ NEVER invent, assume, or hallucinate table/column names\n"
+                    f"✓ NEVER reference tables/columns not in the schema above\n"
+                    f"✓ Code MUST match the user's request and use relevant data\n"
+                    f"✓ If you cannot fulfill the request with available schema, REFUSE and explain why\n\n"
+                    f"Return response in this exact format:\n"
+                    f"TYPE: <DAX|SQL|PySpark|Python>\n"
+                    f"CODE: <the complete, working code>\n"
+                    f"EXPLANATION: <brief explanation of what this code does and which tables/columns it uses>\n"
+                )
+            
+            res = None
+            last_error: Optional[Exception] = None
+            for model_name in _groq_model_candidates():
+                try:
+                    res = self.client.chat.completions.create(
+                        model=model_name,
+                        temperature=0.1,
+                        max_tokens=2000,
+                        messages=[
+                            {
+                                "role": "system",
+                                "content": (
+                                    "You are a code generation expert. "
+                                    "Your ONLY job: Generate valid, complete code that directly fulfills the request. "
+                                    "RULES: "
+                                    "1) Use ONLY provided tables and columns "
+                                    "2) Never invent or hallucinate entities "
+                                    "3) Return ONLY the code - nothing else "
+                                    "4) Code must be valid and production-ready "
+                                    "5) Follow all requested conditions exactly "
+                                    "6) For measures: include full definition with IF/AND/OR logic as needed "
+                                    "7) For queries: return complete SELECT/CREATE statement "
+                                    "If you cannot fulfill with available schema, say so."
+                                )
+                            },
+                            {"role": "user", "content": prompt},
+                        ],
+                    )
+                    break
+                except Exception as model_exc:
+                    last_error = model_exc
+                    model_msg = str(model_exc).lower()
+                    # Retry on model lifecycle errors with next configured fallback model.
+                    if any(k in model_msg for k in ["model_decommissioned", "does not exist", "not supported"]):
+                        continue
+                    raise
+
+            if res is None:
+                if last_error is not None:
+                    raise last_error
+                raise RuntimeError("No Groq response produced.")
+
+            # Get the raw response from Groq
+            raw_response = res.choices[0].message.content or ""
+            
+            if not raw_response.strip():
+                print("🔴 Groq returned empty response", flush=True)
+                return {
+                    "type": "ERROR",
+                    "code": "",
+                    "explanation": "❌ Groq returned an empty response. This might be a provider-side filter issue.",
+                    "raw_response": raw_response
+                }
+            
+            # Extract code: Since we instructed the model to return ONLY code,
+            # treat entire response as code, just remove markdown wrappers if present
+            c = raw_response.strip()
+            
+            # Remove markdown code fences if present
+            c = re.sub(r'^```(?:dax|sql|python|pyspark)?\n', '', c, flags=re.I).lstrip()
+            c = re.sub(r'\n```$', '', c).rstrip()
+            
             if not c:
-                return None
-            return {"type": t or _map_intent_to_type(intent["output_type"]), "code": c, "explanation": e or "Generated by LLM."}
+                print(f"🔴 No code extracted from response: {raw_response[:100]}", flush=True)
+                return {
+                    "type": "ERROR",
+                    "code": "",
+                    "explanation": f"❌ Could not extract code from Groq response. Raw response:\n{raw_response}",
+                    "raw_response": raw_response
+                }
+            
+            # ===== Validate generated code against schema =====
+            is_valid, error_msg = self._validate_code_against_schema(c, intent)
+            if not is_valid:
+                # Code doesn't match schema, return error instead
+                return {
+                    "type": "ERROR",
+                    "code": c,
+                    "explanation": f"⚠️ Generated code validation failed: {error_msg}\n\n**What was generated:** {c}",
+                    "raw_response": raw_response
+                }
+            
+            # Determine code type based on intent
+            code_type = _map_intent_to_type(intent["output_type"])
+            
+            return {
+                "type": code_type,
+                "code": c,
+                "explanation": f"Generated {code_type} {intent.get('item_type', 'code')} named '{intent.get('raw', 'item').split()[-1] if intent.get('raw') else 'item'}'.",
+                "raw_response": raw_response
+            }
         except Exception as exc:
-            msg = str(exc).lower()
+            # Report the actual error instead of silently returning None
+            error_msg = str(exc)
+            print(f"🔴 Groq API ERROR: {error_msg}", flush=True)
+            
+            # Check for specific API errors
+            msg = error_msg.lower()
             if any(x in msg for x in ["insufficient_quota", "invalid_api_key", "401", "429"]):
                 self.client = None
-            return None
+                return {
+                    "type": "ERROR",
+                    "code": "",
+                    "explanation": f"❌ API Error: {error_msg}. Check your GROQ_API_KEY and Groq account limits.",
+                    "raw_response": error_msg
+                }
+            elif "timeout" in msg or "deadline" in msg:
+                return {
+                    "type": "ERROR",
+                    "code": "",
+                    "explanation": f"❌ API Timeout: {error_msg}. Groq took too long to respond.",
+                    "raw_response": error_msg
+                }
+            else:
+                return {
+                    "type": "ERROR",
+                    "code": "",
+                    "explanation": f"❌ Unexpected Error: {error_msg}",
+                    "raw_response": error_msg
+                }
 
     def _fallback(self, intent: Dict[str, Any]) -> Dict[str, str]:
+        """Fallback generation - with error checking for invalid schemas."""
+        try:
+            # CRITICAL: Validate schema before attempting fallback generation
+            table_name, value_col, date_col = self._pick_core_columns()
+        except ValueError as e:
+            # If schema validation fails, return error instead of invalid code
+            return {
+                "type": "ERROR",
+                "code": str(e),
+                "explanation": f"Cannot generate code: {str(e)}"
+            }
+        
         t = intent["output_type"]
         req = intent["raw"].lower()
         action = intent.get("action", "compute")
 
-        table_name, value_col, date_col = self._pick_core_columns()
         group_col = self._pick_group_column(table_name, value_col, date_col)
         agg_kind = "avg" if any(k in req for k in ["average", "avg"]) else "sum"
 
@@ -503,8 +916,24 @@ class MultiLanguageGenerationEngine:
 
     def _pick_core_columns(self) -> Tuple[str, str, Optional[str]]:
         tables = self.metadata.get("tables", {}) if isinstance(self.metadata, dict) else {}
+        
+        # CRITICAL: If no tables or no columns in any table, raise error instead of using placeholders
         if not tables:
-            return ("Sales", "Sales", "OrderDate")
+            raise ValueError(
+                "❌ GENERATION FAILED: No tables defined in schema. "
+                "Upload a PBIX file or define your schema first."
+            )
+        
+        # Check if any table has columns defined
+        has_any_columns = any(
+            t.get("columns") 
+            for t in tables.values()
+        )
+        if not has_any_columns:
+            raise ValueError(
+                "❌ GENERATION FAILED: Tables exist but have no columns defined. "
+                "Ensure your schema includes column information."
+            )
 
         profile = self.metadata.get("training_profile", {}) if isinstance(self.metadata.get("training_profile", {}), dict) else {}
         preferred_table = profile.get("preferred_table")
@@ -530,6 +959,8 @@ class MultiLanguageGenerationEngine:
         candidates = []
         for tname, info in tables.items():
             cols = list((info.get("columns") or {}).keys())
+            if not cols:  # Skip tables with no columns
+                continue
             low_cols = [c.lower() for c in cols]
             value_idx = None
             for i, c in enumerate(low_cols):
@@ -551,6 +982,12 @@ class MultiLanguageGenerationEngine:
             score = 1 if value_idx is not None else 0
             candidates.append((score, tname, value_col, date_col))
 
+        if not candidates:
+            raise ValueError(
+                "❌ GENERATION FAILED: Could not find valid tables with columns. "
+                "Please verify your schema has columns defined."
+            )
+        
         candidates.sort(key=lambda x: x[0], reverse=True)
         _, tname, value_col, date_col = candidates[0]
         return (tname, value_col, date_col)
@@ -986,7 +1423,7 @@ class UniversalFabricAssistant:
         self.store.save_metadata()
         return profile
 
-    def run_once(self, user_input: str, target: Optional[str] = None) -> Dict[str, Any]:
+    def run_once(self, user_input: str, target: Optional[str] = None, user_params: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
         intent = self.detector.detect_intent(user_input, preferred_target=target)
 
         if intent.get("action") == "identify_relationships":
@@ -1006,10 +1443,15 @@ class UniversalFabricAssistant:
                 "relationships": relationships,
             }
 
-        generated = self.generator.generate_code(intent)
+        # ENHANCED: Pass user_params to generator for comprehensive packet building
+        generated = self.generator.generate_code(intent, user_params=user_params)
         generated = self._enforce_target_output_type(generated=generated, intent=intent, target=target)
 
-        object_name = self._derive_object_name(user_input, intent["output_type"])
+        requested_name = ""
+        if isinstance(user_params, dict):
+            requested_name = str(user_params.get("item_name", "")).strip()
+
+        object_name = requested_name or self._derive_object_name(user_input, intent["output_type"])
         object_type = intent["output_type"]
 
         paste_ready_query = self._build_paste_ready_query(
@@ -1110,6 +1552,11 @@ class UniversalFabricAssistant:
             expected = _map_intent_to_type(intent.get("output_type", "python_logic"))
 
         actual = str(generated.get("type", "")).strip()
+
+        # Preserve explicit generation errors from LLM; do not replace with fallback code.
+        if actual.upper() == "ERROR":
+            return generated
+
         if actual.lower() == str(expected).lower():
             return generated
 
@@ -1221,7 +1668,7 @@ def detect_intent(user_input: str, preferred_target: Optional[str] = None) -> Di
 
 def generate_code(user_input: str, preferred_target: Optional[str] = None, api_key: Optional[str] = None) -> Dict[str, Any]:
     store = MetadataStore()
-    client = configure_openai_client(api_key=api_key)
+    client = configure_groq_client(api_key=api_key)
     context_builder = ContextBuilder(store.metadata)
     detector = IntentDetectionEngine()
     intent = detector.detect_intent(user_input, preferred_target=preferred_target)
@@ -1247,7 +1694,7 @@ def explain_output(generated_type: str, code: str) -> str:
 
 def run_agent(api_key: Optional[str] = None) -> None:
     store = MetadataStore()
-    client = configure_openai_client(api_key=api_key)
+    client = configure_groq_client(api_key=api_key)
     assistant = UniversalFabricAssistant(
         store=store,
         ingestion=DataIngestionLayer(store),

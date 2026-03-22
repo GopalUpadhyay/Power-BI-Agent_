@@ -1,0 +1,164 @@
+╔════════════════════════════════════════════════════════════════════════════════════════════════════╗
+║                          🧠 COMPREHENSIVE CODE GENERATION PACKET                                  ║
+╚════════════════════════════════════════════════════════════════════════════════════════════════════╝
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+📊 PART 1: CHATGPT CONTEXT (CURRENT MODEL INFORMATION)
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+================================================================================
+POWER BI / MICROSOFT FABRIC MODEL CONTEXT
+================================================================================
+
+📊 TABLES AND COLUMNS:
+────────────────────────────────────────────────────────────────────────────
+
+🔷 Table: Sales (13 columns)
+  ────────────────────────────────────────────────────────────────────────────
+    • Day                                      → string
+    • Month                                    → string
+    • ProductKey                               → string
+    • Quarter                                  → string
+    • ResellerKey                              → string
+    • SalesOrderNumber                         → string
+    • SalesTerritoryKey                        → string
+    • Sum of Cost                              → string
+    • Sum of Quantity                          → string
+    • Sum of Sales                             → string
+    • Sum of Unit Price                        → string
+    • Year                                     → string
+    • EmployeeKey                              → string
+
+🔷 Table: Targets (6 columns)
+  ────────────────────────────────────────────────────────────────────────────
+    • Day                                      → string
+    • Month                                    → string
+    • Quarter                                  → string
+    • Sum of Target                            → string
+    • Year                                     → string
+    • EmployeeID                               → string
+
+🔷 Table: SalesPersonRegion (2 columns)
+  ────────────────────────────────────────────────────────────────────────────
+    • Count of SalesTerritoryKey               → string
+    • EmployeeKey                              → string
+
+🔷 Table: SalesPerson (5 columns)
+  ────────────────────────────────────────────────────────────────────────────
+    • EmployeeKey                              → string
+    • Salesperson                              → string
+    • Title                                    → string
+    • UPN                                      → string
+    • EmployeeID                               → string
+
+🔷 Table: Region (4 columns)
+  ────────────────────────────────────────────────────────────────────────────
+    • Group                                    → string
+    • Region                                   → string
+    • SalesTerritoryKey                        → string
+    • Country                                  → string
+
+🔷 Table: Product (8 columns)
+  ────────────────────────────────────────────────────────────────────────────
+    • Category                                 → string
+    • Color                                    → string
+    • Font Color Format                        → string
+    • Product                                  → string
+    • ProductKey                               → string
+    • Standard Cost                            → string
+    • Subcategory                              → string
+    • Background Color Format                 → string
+
+
+🔗 RELATIONSHIPS (Table Joins/Foreign Keys):
+────────────────────────────────────────────────────────────────────────────
+
+  🔗 Targets_SalesPerson_EmployeeID
+     Targets.EmployeeID ════→ SalesPerson.EmployeeID
+
+  🔗 Sales_SalesPersonRegion_EmployeeKey
+     Sales.EmployeeKey ════→ SalesPersonRegion.EmployeeKey
+
+  🔗 Sales_Region_SalesTerritoryKey
+     Sales.SalesTerritoryKey ════→ Region.SalesTerritoryKey
+
+  🔗 Sales_Product_ProductKey
+     Sales.ProductKey ════→ Product.ProductKey
+
+
+📐 EXISTING MEASURES (Calculated Metrics):
+────────────────────────────────────────────────────────────────────────────
+⚠️  No measures defined (you can create new ones)
+
+
+⚙️  CALCULATED COLUMNS:
+────────────────────────────────────────────────────────────────────────────
+⚠️  No calculated columns defined
+
+
+📋 CALCULATED TABLES:
+────────────────────────────────────────────────────────────────────────────
+⚠️  No calculated tables defined
+
+================================================================================
+END OF MODEL CONTEXT
+================================================================================
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+⚙️  PART 2: MODEL SUMMARY
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+📈 SCHEMA STATISTICS:
+  • Total Tables: 6
+  • Total Columns: 38
+  • Relationships: 4
+  • Predefined Measures: 0
+  • Calculated Columns: 0
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+👤 PART 3: USER REQUEST PARAMETERS (WHAT USER WANTS)
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+📌 GENERATION CONFIGURATION:
+  • Item Type: measure
+  • Output Language: DAX
+  • Usage Target: Semantic Model
+  • Item Name: 'testMeasure9'
+  • Description: 'Create a measure which will return yes if Year = 2017 else No'
+  • Conditions: (none)
+
+🎯 USER INTENT:
+  Create a measure which will return yes if Year = 2017 else No
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+✅ PART 4: STRICT REQUIREMENTS (WHAT CHATGPT MUST DO)
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+🔒 MANDATORY RULES (DO NOT BREAK):
+  1. ✓ Use ONLY tables shown in PART 1 schema
+  2. ✓ Use ONLY columns shown for each table in PART 1
+  3. ✓ Match user intent from PART 3 exactly
+  4. ✓ Use user-provided item name: "testMeasure9"
+  5. ✓ Generate code for: DAX
+  6. ✓ Code will be used in: Semantic Model
+  7. ✓ NEVER invent, assume, or hallucinate any tables/columns
+  8. ✓ Code must address the description: "Create a measure which will return yes if Year = 2017 else No"
+  9. ✓ Provide output in exact format specified below
+
+📍 AVAILABLE TABLES TO USE:
+  Sales, Targets, SalesPersonRegion, SalesPerson, Region, Product
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+📝 PART 5: OUTPUT FORMAT (REQUIRED)
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+Return EXACTLY in this format:
+
+TYPE: <DAX>
+CODE: <complete, working code that uses tables from line 'AVAILABLE TABLES' above>
+EXPLANATION: <explain what this code does, which tables/columns it uses, and how it matches the intent>
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+Generate code NOW using only the schema and parameters above:
+

@@ -33,9 +33,6 @@ hideSidebarNav = false
 [deprecation]
 showPyplotGlobalUse = false
 
-[client.toolbarMode]
-value = "viewer"
-
 [browser]
 gatherUsageStats = false
 serverAddress = "localhost"
@@ -49,9 +46,3 @@ suppressDeprecationWarnings = true
 [runner]
 magicEnabled = true
 fastReruns = true
-
-[client.showErrorDetails]
-value = true
-
-[logger.datetimeFormat]
-value = "%Y-%m-%d %H:%M:%S"

@@ -9,7 +9,6 @@ import pandas as pd
 import streamlit as st
 
 from .cli import build_agent
-from .formula_corrector import FormulaCorrector
 from .fabric_universal import (
     ContextBuilder,
     DataIngestionLayer,
@@ -122,6 +121,141 @@ def _train_active_model(model_store: ModelStore, model_id: str, agent) -> Dict[s
     )
     model_store.save_metadata(model_id, metadata)
     return profile
+
+
+def _refresh_model_context_automatically(active_model: Dict[str, Any], model_store: ModelStore) -> None:
+    """Automatically generate and cache comprehensive model context.
+    
+    This runs in the background whenever the model is loaded/reloaded,
+    so Groq always has fresh complete context without user clicks.
+    """
+    try:
+        from .fabric_universal import ContextBuilder
+        
+        active_metadata = model_store.load_metadata(active_model["id"])
+        
+        if not isinstance(active_metadata, dict):
+            return
+        
+        if not active_metadata.get("tables"):
+            # No tables yet - clear cached context
+            st.session_state.model_context_cache = None
+            st.session_state.model_context_summary = None
+            return
+        
+        # Build comprehensive context
+        context_builder = ContextBuilder(active_metadata)
+        comprehensive_context = context_builder.build_context()
+        summary = context_builder.get_model_summary()
+        
+        # Cache in session state (persists across reruns)
+        st.session_state.model_context_cache = comprehensive_context
+        st.session_state.model_context_summary = summary
+        st.session_state.model_context_model_id = active_model["id"]
+        
+    except Exception as e:
+        # Silently fail - don't block UI if context generation fails
+        st.session_state.model_context_cache = None
+        st.session_state.model_context_summary = None
+
+
+def _display_model_context_automatically(context_title: str = "🧠 LLM Context (What Groq will see)") -> bool:
+    """Display cached model context if available.
+    
+    Returns True if context was displayed, False otherwise.
+    """
+    try:
+        summary = st.session_state.get("model_context_summary")
+        context = st.session_state.get("model_context_cache")
+        
+        if not summary or not context:
+            return False
+        
+        # Display context using cached values
+        with st.expander(context_title, expanded=False):
+            col1, col2, col3, col4, col5 = st.columns(5)
+            with col1:
+                st.metric("📊 Tables", summary["table_count"])
+            with col2:
+                st.metric("🔤 Columns", summary["total_columns"])
+            with col3:
+                st.metric("📐 Measures", summary["measure_count"])
+            with col4:
+                st.metric("🔗 Relationships", summary["relationship_count"])
+            with col5:
+                st.metric("⚙️  Calc Columns", summary["calculated_column_count"])
+            
+            st.write("**Available tables:**")
+            table_info = ", ".join([f"{t} ({len(cols)} cols)" for t, cols in summary["tables"].items()])
+            st.markdown(f"`{table_info}`")
+            
+            st.write("**Full context:** (Shown below)")
+            st.code(context, language="text")
+        
+        return True
+    except Exception as e:
+        return False
+
+
+def _display_generation_packet(item_type: str, output_language: str, usage_target: str, item_name: str, description: str, conditions: str = "") -> None:
+    """Display the comprehensive generation packet that will be sent to the LLM provider.
+    
+    This shows users exactly what information Groq will see for generating code.
+    """
+    try:
+        summary = st.session_state.get("model_context_summary")
+        context = st.session_state.get("model_context_cache")
+        
+        if not summary or not context:
+            return
+        
+        with st.expander("📦 **GENERATION PACKET** (All Information Being Sent to Groq)", expanded=True):
+            st.write("This packet contains **everything** Groq will see to generate your code:")
+            st.divider()
+            
+            # Part 1: Context
+            st.write("### 📊 **Part 1: Model Context (Groq Sees Full Schema)**")
+            with st.expander("View Full Model Context"):
+                st.code(context, language="text")
+            
+            # Part 2: Parameters
+            st.write("### ⚙️ **Part 2: Your Request Parameters**")
+            params_df = pd.DataFrame([
+                {"Parameter": "Item Type", "Value": item_type},
+                {"Parameter": "Output Language", "Value": output_language},
+                {"Parameter": "Usage Target", "Value": usage_target},
+                {"Parameter": "Item Name", "Value": item_name},
+                {"Parameter": "Description", "Value": description},
+                {"Parameter": "Conditions", "Value": conditions if conditions else "(none)"},
+            ])
+            st.dataframe(params_df, use_container_width=True, hide_index=True)
+            
+            # Part 3: Model Stats
+            st.write("### 📈 **Part 3: Model Summary (Easy Reference)**")
+            col1, col2, col3, col4, col5 = st.columns(5)
+            with col1:
+                st.metric("Tables", summary["table_count"])
+            with col2:
+                st.metric("Columns", summary["total_columns"])
+            with col3:
+                st.metric("Relationships", summary["relationship_count"])
+            with col4:
+                st.metric("Measures", summary["measure_count"])
+            with col5:
+                st.metric("Calc Cols", summary["calculated_column_count"])
+            
+            # Part 4: Available Tables
+            st.write("### 📋 **Part 4: Available Tables in Model**")
+            tables = summary.get("tables", {})
+            for table_name, cols in tables.items():
+                st.write(f"**{table_name}** ({len(cols)} columns)")
+                st.code(", ".join(cols), language="text")
+            
+            st.divider()
+            st.info("✅ **When you click 'Generate', ALL the above information will be sent to Groq** to ensure accurate code generation matching your model schema and request.")
+    
+    except Exception as e:
+        pass  # Silently fail - don't block generation
 
 
 def _build_universal_assistant(api_key: str, metadata: Optional[Dict[str, Any]] = None):
@@ -394,11 +528,40 @@ def run_ui() -> None:
     with st.sidebar:
         st.header("Session")
         api_key_input = st.text_input(
-            "OpenAI API Key (optional override)",
+            "Groq API Key (optional override)",
             type="password",
             value="",
-            help="Leave blank to use OPENAI_API_KEY from .env",
+            help="Leave blank to use GROQ_API_KEY from .env",
         )
+        
+        # ===== NEW: Display API Key Status =====
+        import os
+        env_api_key = os.getenv("GROQ_API_KEY", "").strip()
+        effective_key = api_key_input.strip() if api_key_input else env_api_key
+        
+        # Show visual indicator
+        if api_key_input.strip():
+            # User provided a key
+            st.success("✅ **API Key Added** (from input)")
+            key_source = "input field"
+        elif env_api_key:
+            # Key from .env
+            st.info("ℹ️ **API Key Loaded** (from .env)")
+            key_source = ".env file"
+        else:
+            # No key available
+            st.error("❌ **No API Key** (Groq features limited)")
+            key_source = "not available"
+        
+        # Show key status in small text
+        if effective_key:
+            key_preview = effective_key[:8] + "..." + effective_key[-4:]
+            st.caption(f"🔐 Key source: {key_source}\n📍 Preview: `{key_preview}`")
+        else:
+            st.caption("🔐 Key source: not configured\n⚠️ Set GROQ_API_KEY in .env or paste above")
+        
+        st.divider()
+        
         selected_model_id = st.selectbox(
             "Active Model",
             options=list(model_map.keys()),
@@ -446,6 +609,10 @@ def run_ui() -> None:
 
     agent = st.session_state.agent
     universal_assistant = st.session_state.universal_assistant
+    
+    # ===== AUTO-REFRESH MODEL CONTEXT IN BACKGROUND =====
+    # This runs automatically on every page load/reload to ensure Groq always has fresh context
+    _refresh_model_context_automatically(active_model, model_store)
 
     all_items = list(agent.registry.items.values())
     generated_items = [i for i in all_items if i.get("source") == "generated"]
@@ -832,6 +999,35 @@ def run_ui() -> None:
                                             st.write(f"**{measure_name}** (in {measure_info.get('table', 'Unknown')})")
                                             st.code(measure_info.get("expression", ""), language="sql")
                                 
+                                # ===== NEW: COMPREHENSIVE MODEL CONTEXT FOR GROQ =====
+                                st.divider()
+                                st.subheader("🧠 Model Context for Code Generation")
+                                st.write("This is the **complete model context** that Groq will use to generate code. Groq will see all tables, columns, relationships, and measures:")
+                                
+                                # Build and display comprehensive context
+                                from .fabric_universal import ContextBuilder
+                                context_builder = ContextBuilder(extracted_metadata)
+                                comprehensive_context = context_builder.build_context()
+                                
+                                # Display in a code block so user can verify
+                                with st.expander("📋 Full Model Context (Sent to Groq)", expanded=False):
+                                    st.code(comprehensive_context, language="text")
+                                
+                                # Display summary stats
+                                summary = context_builder.get_model_summary()
+                                col1, col2, col3, col4 = st.columns(4)
+                                with col1:
+                                    st.metric("📊 Tables", summary["table_count"])
+                                with col2:
+                                    st.metric("🔤 Total Columns", summary["total_columns"])
+                                with col3:
+                                    st.metric("📐 Measures", summary["measure_count"])
+                                with col4:
+                                    st.metric("⚙️  Calculated Columns", summary["calculated_column_count"])
+                                
+                                st.success("✅ Groq will now have complete access to your model structure!")
+                                st.divider()
+                                
                                 # Train the agent
                                 st.info("🤖 Training agent on extracted model schema...")
                                 st.session_state.agent = _build_agent_for_model(
@@ -896,6 +1092,35 @@ def run_ui() -> None:
                                 "To": f"{rel.get('to_table')}.{rel.get('to_column')}",
                             })
                         st.dataframe(pd.DataFrame(rel_rows), use_container_width=True)
+                
+                # ===== NEW: Display Comprehensive Model Context (same as PBIX) =====
+                st.divider()
+                st.subheader("🧠 Model Context for Code Generation")
+                st.write("This is the **complete model context** that Groq will use to generate code. Groq will see all tables, columns, relationships, and measures:")
+                
+                # Build and display comprehensive context
+                from .fabric_universal import ContextBuilder
+                context_builder = ContextBuilder(updated_metadata)
+                comprehensive_context = context_builder.build_context()
+                
+                # Display in a code block so user can verify
+                with st.expander("📋 Full Model Context (Sent to Groq)", expanded=False):
+                    st.code(comprehensive_context, language="text")
+                
+                # Display summary stats
+                summary = context_builder.get_model_summary()
+                col1, col2, col3, col4 = st.columns(4)
+                with col1:
+                    st.metric("📊 Tables", summary["table_count"])
+                with col2:
+                    st.metric("🔤 Total Columns", summary["total_columns"])
+                with col3:
+                    st.metric("📐 Measures", summary["measure_count"])
+                with col4:
+                    st.metric("⚙️  Calculated Columns", summary["calculated_column_count"])
+                
+                st.success("✅ Groq will now have complete access to your model structure!")
+                st.divider()
                 
                 st.session_state.agent = _build_agent_for_model(
                     api_key=api_key_input,
@@ -973,6 +1198,11 @@ def run_ui() -> None:
     with tab_generate:
         st.subheader("Generate New Item")
         st.info("💡 **Item Name is used as the name for all generated content** (DAX, SQL, PySpark, etc.)")
+        
+        # ===== AUTO-DISPLAY MODEL CONTEXT (Cached from background refresh) =====
+        # Context is automatically refreshed in background on page load, just display it here
+        _display_model_context_automatically("🧠 LLM Context (What Groq will see)")
+        
         with st.form("generate_form"):
             item_type = st.selectbox("Item Type", ["measure", "flag", "column", "table"], index=0)
             output_language = st.selectbox("Output Language", ["DAX", "SQL", "PySpark", "Python"], index=0)
@@ -993,251 +1223,195 @@ def run_ui() -> None:
             elif not item_name.strip():
                 st.error("Item Name is required - it will be used as the name for the generated content.")
             else:
-                if output_language == "DAX" and usage_target == "Semantic Model":
-                    result = agent.generate_item(
-                        description=description.strip(),
-                        item_type=item_type,
-                        conditions=conditions.strip(),
-                        auto_register=auto_register,
-                    )
-
-                    # Use the item_name field as the final name for the generated content
-                    final_generated_name = item_name.strip()
-                    
-                    # Update the result with the custom name from item_name field
-                    result['name'] = final_generated_name
-                    
-                    # Re-register with the correct name if auto_register is enabled
-                    if auto_register:
-                        agent.registry.register(
-                            name=final_generated_name,
-                            item_type=result['item_type'],
-                            expression=result.get('expression', ''),
-                            description=description.strip()
-                        )
-
-                    st.success(f"✓ Generated and saved as: {final_generated_name} ({result['item_type']})")
-
-                    if result["validation_errors"]:
-                        st.warning("Validation issues found:")
-                        for issue in result["validation_errors"]:
-                            st.write(f"- {issue}")
-                    else:
-                        st.success("Validation passed.")
-
-                    with st.expander("📝 View Expression (DAX/Spark Query)", expanded=False):
-                        st.code(result["expression"], language="sql")
-                        st.write("**Explanation**")
-                        st.write(result["explanation"])
-
-                    with st.expander("📋 Paste-Ready Query", expanded=True):
-                        st.code(result.get("paste_ready_query", result["expression"]), language="sql")
-
-                    if result["similar_candidates"]:
-                        st.write("**Similar candidates**")
-                        for name, score in result["similar_candidates"]:
-                            st.write(f"- {name} ({score:.2f})")
-
-                    st.write("**Optimization tips**")
-                    for tip in result["tips"]:
-                        st.write(f"- {tip}")
+                # CRITICAL: Validate metadata before generation
+                active_metadata = model_store.load_metadata(active_model["id"])
+                
+                if not isinstance(active_metadata, dict):
+                    st.error("❌ ERROR: No model metadata loaded! Please upload a PBIX file or define your schema first.")
+                    st.info("📝 Steps to fix:\n1. Go to the 'Models' tab\n2. Upload a Power BI PBIX file\n3. Or manually add tables and columns\n4. Then come back to generate code")
+                elif not active_metadata.get("tables"):
+                    st.error("❌ ERROR: Model has no tables defined! Cannot generate code with incomplete schema.")
+                    st.info("📝 Steps to fix:\n1. Upload a PBIX file with tables, OR\n2. Go to 'Schema' tab and manually add table definitions")
                 else:
-                    target_map = {
-                        "Semantic Model": "semantic",
-                        "Warehouse": "warehouse",
-                        "Notebook": "notebook",
-                        "Python Script": "python",
-                    }
-                    target = target_map.get(usage_target, "semantic")
-
-                    if output_language == "SQL":
-                        target = "warehouse"
-                    elif output_language == "PySpark":
-                        target = "notebook"
-                    elif output_language == "Python":
-                        target = "python"
-                    elif output_language == "DAX":
-                        target = "semantic"
-
-                    # ENHANCED: Build detailed prompt with full schema context and join guidance
-                    schema_context = ""
-                    active_metadata = model_store.load_metadata(active_model["id"])
-                    if isinstance(active_metadata, dict):
-                        tables = active_metadata.get("tables", {})
-                        if tables:
-                            schema_context = "\n\n=== SCHEMA INFORMATION ===\n"
-                            schema_context += "\nTABLE STRUCTURES:\n"
-                            for table_name, info in tables.items():
-                                columns = info.get("columns", {})
-                                col_list = ", ".join(columns.keys()) if columns else "No columns"
-                                schema_context += f"  • {table_name}: {col_list}\n"
-                        
-                        relationships = active_metadata.get("relationships", [])
-                        if relationships:
-                            schema_context += "\nRELATIONSHIP MAP (for joining):\n"
-                            for rel in relationships:
-                                from_table = rel.get('from_table', 'Unknown')
-                                from_col = rel.get('from_column', 'Unknown')
-                                to_table = rel.get('to_table', 'Unknown')
-                                to_col = rel.get('to_column', 'Unknown')
-                                # Clean column names (remove Unicode artifacts)
-                                from_col_clean = from_col.replace('\ufeff', '').strip()
-                                to_col_clean = to_col.replace('\ufeff', '').strip()
-                                schema_context += f"  • {from_table}[{from_col_clean}] joins {to_table}[{to_col_clean}]\n"
-                        
-                        # Add column semantic descriptions
-                        schema_context += "\n=== COLUMN DEFINITIONS (what each column represents) ===\n"
-                        if tables:
-                            for table_name, info in tables.items():
-                                columns = info.get("columns", {})
-                                if columns:
-                                    schema_context += f"\n{table_name}:\n"
-                                    for col_name, col_info in columns.items():
-                                        col_clean = col_name.replace('\ufeff', '').strip()
-                                        # Infer column purpose from name
-                                        if any(x in col_clean.lower() for x in ["amount", "sales", "revenue", "price", "cost"]):
-                                            col_type = "NUMERIC (monetary value)"
-                                        elif any(x in col_clean.lower() for x in ["quantity", "count", "number", "total"]):
-                                            col_type = "NUMERIC (count/quantity)"
-                                        elif any(x in col_clean.lower() for x in ["date", "month", "year", "time"]):
-                                            col_type = "DATE/TIME"
-                                        elif any(x in col_clean.lower() for x in ["key", "id"]):
-                                            col_type = "ID/KEY (for joins)"
-                                        else:
-                                            col_type = "TEXT/ATTRIBUTE"
-                                        schema_context += f"    • {col_clean}: {col_type}\n"
-                        
-                        # Add common metric patterns
-                        schema_context += "\n=== COMMON DAX METRIC PATTERNS (examples for your columns) ===\n"
-                        schema_context += "Total/Sum: SUM(Sales[SalesAmount])\n"
-                        schema_context += "Average: AVERAGE(Sales[SalesAmount])\n"
-                        schema_context += "Count of Orders: DISTINCTCOUNT(Sales[OrderID])\n"
-                        schema_context += "Average Order Value: DIVIDE(SUM(Sales[SalesAmount]), DISTINCTCOUNT(Sales[OrderID]))\n"
-                        schema_context += "Sales by Product: CALCULATE([Total Sales], FILTER(Product, Product[ProductKey] = SELECTEDVALUE(Product[ProductKey])))\n"
-                        schema_context += "Profit Margin: DIVIDE(SUM(Sales[SalesAmount]) - SUM(Sales[ProductCost]), SUM(Sales[SalesAmount]))\n"
-                        
-                        schema_context += "\nJOIN PATTERNS:\n"
-                        schema_context += "  • Use LEFT JOINs to preserve all fact table records\n"
-                        schema_context += "  • Join through intermediate tables (e.g., through SalesPerson to reach SalesPersonRegion)\n"
-                        schema_context += "  • Always qualify column names: df['ColumnName'] == OtherTable['ColumnName']\n"
-                        schema_context += "  • Include clear comments for each join explaining its purpose\n"
-                        
-                        schema_context += "\n=== OUTPUT REQUIREMENTS ===\n"
-                        if output_language == "DAX":
-                            schema_context += "For DAX measures:\n"
-                            schema_context += "  1. Use exact column names from schema (case-sensitive)\n"
-                            schema_context += "  2. Qualify all columns: Table[Column]\n"
-                            schema_context += "  3. Use appropriate aggregation: SUM for amounts, AVERAGE for rates, DISTINCTCOUNT for unique counts\n"
-                            schema_context += "  4. For metrics like 'average order value', use DIVIDE(SUM of amounts, DISTINCTCOUNT of orders)\n"
-                            schema_context += "  5. Never sum ID/Key columns - only sum numeric values (SalesAmount, ProductCost, etc)\n"
-                            schema_context += "  6. Use CALCULATE for filtering by dimension attributes\n"
-                        elif output_language == "SQL":
-                            schema_context += "For SQL:\n"
-                            schema_context += "  1. Use correct table names and column names\n"
-                            schema_context += "  2. Use GROUP BY with SUM/AVG/COUNT appropriately\n"
-                        elif output_language == "PySpark":
-                            schema_context += "For PySpark denormalized table joins:\n"
-                            schema_context += "  1. Start with base table (Sales recommended)\n"
-                            schema_context += "  2. Join each related table using LEFT JOIN to preserve rows\n"
-                            schema_context += "  3. For multi-hop relationships, join through intermediate tables\n"
-                            schema_context += "  4. Include clear comments above each join explaining the relationship\n"
-                            schema_context += "  5. Create final temp view with meaningful name\n"
-                            schema_context += "  6. Use proper column escaping for special characters\n"
-                    
-                    # IMPROVED: Use intelligent FormulaCorrector for DAX formulas DIRECTLY
-                    u_result = {}
-                    
-                    if output_language == "DAX" and item_type in ["measure", "flag", "column"]:
-                        # Use intelligent semantic formula generation for DAX
-                        try:
-                            corrector = FormulaCorrector(active_metadata)
-                            formula, warnings = corrector.generate_dax_formula(
-                                description.strip(),
-                                item_type=item_type
-                            )
-                            
-                            u_result = {
-                                "type": "DAX",
-                                "code": formula,
-                                "explanation": f"Generated {item_type} using intelligent schema analysis: {description.strip()}",
-                                "validation": "passed" if not formula.startswith("ERROR") else "failed"
-                            }
-                            
-                            if warnings:
-                                st.warning("⚠️ Warnings during generation:")
-                                for w in warnings:
-                                    st.write(f"  • {w}")
-                            
-                            st.success(f"✓ Generated intelligent DAX {item_type} using semantic schema matching")
-                            
-                        except Exception as e:
-                            logger.warning(f"FormulaCorrector generation failed: {e}, falling back to universal assistant")
-                            # Fallback to universal assistant if FormulaCorrector fails
-                            universal_prompt = f"Create {item_type}: {description.strip()}"
-                            if conditions.strip():
-                                universal_prompt += f" with conditions {conditions.strip()}"
-                            universal_prompt += schema_context
-                            universal_prompt += "\n\n=== CRITICAL INSTRUCTIONS ===\n"
-                            universal_prompt += "• DO use metric patterns above as templates\n"
-                            universal_prompt += "• DO use the exact column names from the COLUMN DEFINITIONS section\n"
-                            universal_prompt += f"• DO keep the code language consistent: {output_language}\n"
-                            universal_prompt += "• DO NOT sum ID/Key columns (EmployeeKey, ProductKey, OrderID, etc)\n"
-                            universal_prompt += "• DO NOT use columns that are not listed in the schema\n"
-                            universal_prompt += "• RETURN ONLY the code, no explanation\n"
-                            u_result = universal_assistant.run_once(universal_prompt, target=target)
-                            st.success(f"✓ Generated {u_result.get('type', output_language)} for {usage_target}.")
-                    else:
-                        # For non-DAX languages, use universal assistant
-                        universal_prompt = f"Create {item_type}: {description.strip()}"
-                        if conditions.strip():
-                            universal_prompt += f" with conditions {conditions.strip()}"
-                        universal_prompt += schema_context
-                        universal_prompt += "\n\n=== CRITICAL INSTRUCTIONS ===\n"
-                        universal_prompt += "• DO use metric patterns above as templates\n"
-                        universal_prompt += "• DO use the exact column names from the COLUMN DEFINITIONS section\n"
-                        universal_prompt += f"• DO keep the code language consistent: {output_language}\n"
-                        universal_prompt += "• DO NOT create columns that are not explicitly requested\n"
-                        universal_prompt += "• DO NOT use columns that are not listed in the schema\n"
-                        universal_prompt += "• RETURN ONLY the code, no explanation\n"
-                        u_result = universal_assistant.run_once(universal_prompt, target=target)
-                        st.success(f"✓ Generated {u_result.get('type', output_language)} for {usage_target}.")
-                    
-                    corrected_code = u_result.get("code", "")
-
-                    # Register the generated item in the registry so it appears in Created Items
-                    if u_result and u_result.get("code"):
-                        # ALWAYS use the item_name field as the name for generated content
-                        # This ensures the user's custom name is applied to whatever is generated
-                        final_item_name = item_name.strip()
-                        
-                        agent.registry.register(
-                            name=final_item_name,
-                            item_type=item_type,
-                            expression=u_result.get("code", ""),
-                            description=description.strip() + f"\n({u_result.get('type', output_language)} for {usage_target})"
-                        )
-                        st.success(f"✓ Saved to Created Items as '{final_item_name}' ({item_type})")
-
-                    lang_map = {
-                        "DAX": "sql",
-                        "SQL": "sql",
-                        "PySpark": "python",
-                        "Python": "python",
-                    }
-                    st.code(u_result.get("code", ""), language=lang_map.get(u_result.get("type", "Python"), "text"))
-                    st.write("**Explanation**")
-                    st.write(u_result.get("explanation", ""))
-
-                    st.write("**Paste-Ready Query/Script**")
-                    st.code(
-                        u_result.get("paste_ready_query", u_result.get("code", "")),
-                        language=lang_map.get(u_result.get("type", "Python"), "text"),
+                    # Check if we have columns in at least one table
+                    has_columns = any(
+                        table_info.get("columns") 
+                        for table_info in active_metadata.get("tables", {}).values()
                     )
+                    if not has_columns:
+                        st.error("❌ ERROR: Tables exist but have no columns defined!")
+                        st.info("Make sure your schema includescolumn information before generating code.")
+                    else:
+                        # ===== DISPLAY GENERATION PACKET BEFORE GENERATING =====
+                        st.divider()
+                        _display_generation_packet(
+                            item_type=item_type,
+                            output_language=output_language,
+                            usage_target=usage_target,
+                            item_name=item_name,
+                            description=description.strip(),
+                            conditions=conditions.strip()
+                        )
+                        st.divider()
+                        
+                        # Now that user has seen the packet, proceed with generation
+                        # UPDATED: Use Groq everywhere (removed old DAX-specific path)
+                        # All code generation now uses universal_assistant with comprehensive packet
+                        
+                        target_map = {
+                            "Semantic Model": "semantic",
+                            "Warehouse": "warehouse",
+                            "Notebook": "notebook",
+                            "Python Script": "python",
+                        }
+                        target = target_map.get(usage_target, "semantic")
 
-                    if u_result.get("errors"):
-                        st.write("**Validation Issues**")
-                        for err in u_result.get("errors", []):
-                            st.write(f"- {err}")
+                        if output_language == "SQL":
+                            target = "warehouse"
+                        elif output_language == "PySpark":
+                            target = "notebook"
+                        elif output_language == "Python":
+                            target = "python"
+                        elif output_language == "DAX":
+                            target = "semantic"
+
+                        # ALWAYS use Groq for code generation (skip FormulaCorrector - it generates garbage)
+                        u_result = {}
+                        
+                        # For all languages and types, use universal assistant with comprehensive packet
+                        if True:  # Always use Groq path
+                            # BUILD FOCUSED PROMPT - REQUEST FIRST, SCHEMA SECOND
+                            # This ensures Groq sees the actual request before schema details
+                            
+                            # Build MINIMAL schema context (only what's needed)
+                            minimal_schema = ""
+                            active_metadata = model_store.load_metadata(active_model["id"])
+                            if isinstance(active_metadata, dict):
+                                tables = active_metadata.get("tables", {})
+                                relationships = active_metadata.get("relationships", [])
+                                
+                                minimal_schema = "AVAILABLE TABLES AND COLUMNS:\n"
+                                for table_name, info in tables.items():
+                                    columns = info.get("columns", {})
+                                    col_list = ", ".join(columns.keys()) if columns else "No columns"
+                                    minimal_schema += f"  {table_name}: {col_list}\n"
+                                
+                                if relationships:
+                                    minimal_schema += "\nRELATIONSHIP MAP (join using these):\n"
+                                    for rel in relationships:
+                                        from_table = rel.get('from_table', 'Unknown')
+                                        from_col = rel.get('from_column', 'Unknown').replace('\ufeff', '').strip()
+                                        to_table = rel.get('to_table', 'Unknown')
+                                        to_col = rel.get('to_column', 'Unknown').replace('\ufeff', '').strip()
+                                        minimal_schema += f"  {from_table}[{from_col}] → {to_table}[{to_col}]\n"
+                            
+                            # BUILD THE PROMPT WITH REQUEST FIRST
+                            universal_prompt = f"""YOU ARE A {output_language} CODE GENERATION EXPERT.
+
+YOUR TASK:
+══════════════════════════════════════════════════════════════════════
+Create a {output_language} {item_type} NAMED "{item_name}"
+
+REQUEST: {description.strip()}
+{f'CONDITIONS: {conditions.strip()}' if conditions.strip() else ''}
+
+TARGET ENVIRONMENT: {usage_target}
+══════════════════════════════════════════════════════════════════════
+
+SCHEMA YOU HAVE ACCESS TO:
+{minimal_schema}
+
+RULES:
+──────────────────────────────────────────────────────────────────────
+✓ ONLY use tables and columns listed above
+✓ ONLY use column names EXACTLY as shown (case-sensitive with special chars)
+✓ For {output_language}: Use proper {output_language} syntax
+✓ NEVER invent tables or columns
+✓ NEVER average or sum ID/Key columns  
+✓ For measures: Use IF, AND, OR, CALCULATE as needed
+✓ Include ALL logic needed to match the request and conditions
+
+OUTPUT FORMAT:
+──────────────────────────────────────────────────────────────────────
+Return ONLY the complete, valid {output_language} code.
+For a measure named "{item_name}", return the full measure definition.
+For SQL/PySpark, return the complete query.
+NO explanations. NO markdown. Only the code.
+
+NOW GENERATE THE {output_language} {item_type}:"""
+                            
+                            # Create user_params for comprehensive packet building
+                            user_params = {
+                                "item_type": item_type,
+                                "output_language": output_language,
+                                "usage_target": usage_target,
+                                "item_name": item_name,
+                                "description": description.strip(),
+                                "conditions": conditions.strip()
+                            }
+                            # IMPORTANT: Use only the user's natural request for intent detection/object naming.
+                            # The comprehensive schema packet is built separately from user_params in the backend.
+                            intent_request = f"Create {item_type} named {item_name}. {description.strip()}"
+                            if conditions.strip():
+                                intent_request += f" Conditions: {conditions.strip()}"
+                            u_result = universal_assistant.run_once(intent_request, target=target, user_params=user_params)
+                            
+                            # DEBUG: Check what we got back
+                            if not u_result:
+                                st.error("❌ ERROR: Groq returned no response. Check API key and limits.")
+                                st.warning("Debugging info: u_result is empty or None")
+                            elif u_result.get("type") == "ERROR":
+                                st.error(f"❌ GENERATION ERROR: {u_result.get('explanation', 'Unknown error')}")
+                                st.info(f"**Generated code that failed validation:**\n```\n{u_result.get('code', '')}\n```")
+                            else:
+                                st.success(f"✓ Generated {u_result.get('type', output_language)} for {usage_target}.")
+                        
+                        corrected_code = u_result.get("code", "") if u_result else ""
+
+                        # Register the generated item in the registry so it appears in Created Items
+                        if u_result and u_result.get("code") and u_result.get("type") != "ERROR":
+                            # ALWAYS use the item_name field as the name for generated content
+                            # This ensures the user's custom name is applied to whatever is generated
+                            final_item_name = item_name.strip()
+                            
+                            agent.registry.register(
+                                name=final_item_name,
+                                item_type=item_type,
+                                expression=u_result.get("code", ""),
+                                description=description.strip() + f"\n({u_result.get('type', output_language)} for {usage_target})"
+                            )
+                            st.success(f"✓ Saved to Created Items as '{final_item_name}' ({item_type})")
+
+                        if u_result and u_result.get("code"):
+                            lang_map = {
+                                "DAX": "sql",
+                                "SQL": "sql",
+                                "PySpark": "python",
+                                "Python": "python",
+                            }
+                            st.write("### Generated Code")
+                            st.code(u_result.get("code", ""), language=lang_map.get(u_result.get("type", "Python"), "text"))
+                            st.write("**Explanation**")
+                            st.write(u_result.get("explanation", ""))
+
+                            st.write("**Paste-Ready Query/Script**")
+                            st.code(
+                                u_result.get("paste_ready_query", u_result.get("code", "")),
+                                language=lang_map.get(u_result.get("type", "Python"), "text"),
+                            )
+
+                            # Display raw Groq response for verification
+                            if u_result.get("raw_response"):
+                                with st.expander("🔍 Raw Groq Response (Exact Output)", expanded=False):
+                                    st.markdown("**This is the exact output from Groq API:**")
+                                    st.code(u_result.get("raw_response"), language="text")
+                        else:
+                            st.error("❌ No code was generated. Check error messages above.")
+
+                        if u_result.get("errors"):
+                            st.write("**Validation Issues**")
+                            for err in u_result.get("errors", []):
+                                st.write(f"- {err}")
 
     with tab_items:
         st.subheader("Created and Existing Items")
@@ -1436,6 +1610,41 @@ def run_ui() -> None:
                         f"table={profile.get('preferred_table', 'n/a')}, "
                         f"value={profile.get('preferred_value_column', 'n/a')}"
                     )
+                
+                # ===== NEW: Display Comprehensive Model Context for Fabric =====
+                st.divider()
+                st.subheader("🧠 Model Context for Code Generation")
+                st.write("This is the **complete model context** that Groq will use to generate code:")
+                
+                try:
+                    universal_metadata = universal_assistant.store.metadata
+                    if universal_metadata.get("tables"):
+                        from .fabric_universal import ContextBuilder
+                        context_builder = ContextBuilder(universal_metadata)
+                        comprehensive_context = context_builder.build_context()
+                        
+                        # Display in a code block
+                        with st.expander("📋 Full Model Context (Sent to Groq)", expanded=False):
+                            st.code(comprehensive_context, language="text")
+                        
+                        # Display summary stats
+                        summary = context_builder.get_model_summary()
+                        col1, col2, col3, col4 = st.columns(4)
+                        with col1:
+                            st.metric("📊 Tables", summary["table_count"])
+                        with col2:
+                            st.metric("🔤 Total Columns", summary["total_columns"])
+                        with col3:
+                            st.metric("📐 Measures", summary["measure_count"])
+                        with col4:
+                            st.metric("⚙️  Relationships", summary["relationship_count"])
+                        
+                        st.success("✅ Groq will now have complete access to your data model!")
+                except Exception as e:
+                    st.warning(f"Could not display context: {str(e)}")
+                
+                st.divider()
+                
                 # Preserve metadata from ingestion when rebuilding
                 st.session_state.universal_assistant = _build_universal_assistant(
                     api_key_input, metadata=universal_assistant.store.metadata

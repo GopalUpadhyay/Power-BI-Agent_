@@ -387,7 +387,7 @@ def main() -> None:
     parser.add_argument(
         "--api-key",
         default=None,
-        help="OpenAI API key (optional if OPENAI_API_KEY is set)",
+        help="Groq API key (optional if GROQ_API_KEY is set)",
     )
     parser.add_argument(
         "--interactive",
@@ -617,6 +617,6 @@ def main() -> None:
         print("  python run_app.py --fabric-train")
         print("  python run_app.py --fabric-request \"Create total sales\" --fabric-target semantic")
         print("\nOptions:")
-        print("  --api-key KEY                         # Provide OpenAI API key")
+        print("  --api-key KEY                         # Provide Groq API key")
         print("  --log-level {DEBUG,INFO,WARNING}      # Set logging level")
 

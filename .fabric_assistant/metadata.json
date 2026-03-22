@@ -1,0 +1,219 @@
+{
+  "tables": {
+    "Sales": {
+      "columns": {
+        "\ufeffEmployeeKey": "string",
+        "Year": "string",
+        "Quarter": "string",
+        "Month": "string",
+        "Day": "string",
+        "SalesOrderNumber": "string",
+        "SalesTerritoryKey": "string",
+        "Sum of Cost": "string",
+        "ProductKey": "string",
+        "Sum of Quantity": "string",
+        "Sum of Sales": "string",
+        "Sum of Unit Price": "string",
+        "ResellerKey": "string"
+      },
+      "column_count": 13
+    },
+    "Targets": {
+      "columns": {
+        "\ufeffEmployeeID": "string",
+        "Sum of Target": "string",
+        "Year": "string",
+        "Quarter": "string",
+        "Month": "string",
+        "Day": "string"
+      },
+      "column_count": 6
+    },
+    "SalesPersonRegion": {
+      "columns": {
+        "\ufeffEmployeeKey": "string",
+        "Count of SalesTerritoryKey": "string"
+      },
+      "column_count": 2
+    },
+    "SalesPerson": {
+      "columns": {
+        "\ufeffEmployeeID": "string",
+        "EmployeeKey": "string",
+        "Salesperson": "string",
+        "Title": "string",
+        "UPN": "string"
+      },
+      "column_count": 5
+    },
+    "Region": {
+      "columns": {
+        "\ufeffCountry": "string",
+        "Group": "string",
+        "Region": "string",
+        "SalesTerritoryKey": "string"
+      },
+      "column_count": 4
+    },
+    "Product": {
+      "columns": {
+        "\ufeffBackground Color Format": "string",
+        "Category": "string",
+        "Color": "string",
+        "Font Color Format": "string",
+        "Product": "string",
+        "ProductKey": "string",
+        "Standard Cost": "string",
+        "Subcategory": "string"
+      },
+      "column_count": 8
+    }
+  },
+  "relationships": [
+    {
+      "name": "Targets_SalesPerson_\ufeffEmployeeID",
+      "from_table": "Targets",
+      "from_column": "\ufeffEmployeeID",
+      "to_table": "SalesPerson",
+      "to_column": "\ufeffEmployeeID",
+      "confidence": 0.7,
+      "validated": false
+    },
+    {
+      "name": "Sales_SalesPersonRegion_\ufeffEmployeeKey",
+      "from_table": "Sales",
+      "from_column": "\ufeffEmployeeKey",
+      "to_table": "SalesPersonRegion",
+      "to_column": "\ufeffEmployeeKey",
+      "confidence": 0.7,
+      "validated": false
+    },
+    {
+      "name": "Sales_Region_SalesTerritoryKey",
+      "from_table": "Sales",
+      "from_column": "SalesTerritoryKey",
+      "to_table": "Region",
+      "to_column": "SalesTerritoryKey",
+      "confidence": 0.9,
+      "validated": false
+    },
+    {
+      "name": "Sales_Product_ProductKey",
+      "from_table": "Sales",
+      "from_column": "ProductKey",
+      "to_table": "Product",
+      "to_column": "ProductKey",
+      "confidence": 0.9,
+      "validated": false
+    }
+  ],
+  "measures": {
+    "Create_a_measure_the_will_return_yes_if_year_i_2017_elsee_no": {
+      "expression": "SUM(Sales[\ufeffEmployeeKey])",
+      "description": "Create a measure the will return yes if year i 2017 elsee no",
+      "created_at": "2026-03-23T01:46:51.497947"
+    },
+    "testMeasure1": {
+      "expression": "SUM(Sales[\ufeffEmployeeKey])",
+      "description": "Create a measure the will return yes if year i 2017 elsee no",
+      "created_at": "2026-03-23T01:46:51.497988"
+    },
+    "Create_a_measure_that_will_return_yes_if_color_is_red_else_no": {
+      "expression": "SUM(Sales[\ufeffEmployeeKey])",
+      "description": "Create a measure that will return yes if color is red else no",
+      "created_at": "2026-03-23T01:46:51.498001"
+    },
+    "testMeasure2": {
+      "expression": "SUM(Sales[\ufeffEmployeeKey])",
+      "description": "Create a measure that will return yes if color is red else no",
+      "created_at": "2026-03-23T01:46:51.498012"
+    },
+    "Create_a_measure_which_will_return_yes_if_Year__2017_else_No": {
+      "expression": "SUM(Sales[\ufeffEmployeeKey])",
+      "description": "Create a measure which will return yes if Year = 2017 else No",
+      "created_at": "2026-03-23T01:46:51.498022"
+    },
+    "testMeasure_test": {
+      "expression": "SUM(Sales[\ufeffEmployeeKey])",
+      "description": "Create a measure which will return yes if Year = 2017 else No",
+      "created_at": "2026-03-23T01:46:51.498032"
+    },
+    "testMeasure9": {
+      "expression": "SUM(Sales[\ufeffEmployeeKey])",
+      "description": "Create a measure which will return yes if Year = 2017 else No",
+      "created_at": "2026-03-23T01:46:51.498042"
+    },
+    "testMeasure10": {
+      "expression": "SUMMARIZE(Sales, Sales[Quarter], \"Metric\", AVERAGE(Sales[\ufeffEmployeeKey]))",
+      "description": "Create a measure which will return yes if Year = 2019 else No\n(DAX for Semantic Model)",
+      "created_at": "2026-03-23T01:46:51.498052"
+    },
+    "testMeasure11": {
+      "expression": "SUMMARIZE(Sales, Sales[Quarter], \"Metric\", AVERAGE(Sales[\ufeffEmployeeKey]))",
+      "description": "Create a measure which will return yes if Year = 2019 else No\n(DAX for Semantic Model)",
+      "created_at": "2026-03-23T01:46:51.498062"
+    },
+    "testMeasure12": {
+      "expression": "SUMMARIZE(Sales, Sales[Quarter], \"Metric\", AVERAGE(Sales[\ufeffEmployeeKey]))",
+      "description": "\"Create a measure which will return yes if Year = 2019 else No where Sales > 1000\"\n(DAX for Semantic Model)",
+      "created_at": "2026-03-23T01:46:51.498071"
+    },
+    "testMeasure22": {
+      "expression": "SUMMARIZE(Sales, Sales[Quarter], \"Metric\", AVERAGE(Sales[\ufeffEmployeeKey]))",
+      "description": "\"Create a measure which will return yes if Year = 2019 else No where Sales > 1000\"\n(DAX for Semantic Model)",
+      "created_at": "2026-03-23T01:46:51.498080"
+    },
+    "Testmeasure1234r": {
+      "expression": "SUMMARIZE(Sales, Sales[Quarter], \"Metric\", AVERAGE(Sales[\ufeffEmployeeKey]))",
+      "description": "\"Create a measure which will return yes if Year = 2019 else No where Sales > 1000\"\n(DAX for Semantic Model)",
+      "created_at": "2026-03-23T01:46:51.498091"
+    },
+    "testMeasure13": {
+      "expression": "TYPE: DAX\nCODE: \n```\ntestMeasure13 = IF('Sales'[Year] = \"2019\" && 'Sales'[Sum of Sales] > 1000, \"yes\", \"no\")\n```\nEXPLANATION: This DAX code defines a measure named \"testMeasure13\" that checks if the 'Year' column in the 'Sales' table is equal to \"2019\" and if the 'Sum of Sales' column in the 'Sales' table is greater than 1000. If both conditions are met, it returns \"yes\", otherwise it returns \"no\". This code matches the user's intent to create a measure that returns \"yes\" if the year is 2019 and sales are greater than 1000, and \"no\" otherwise. The code uses the 'Sales' table and the 'Year' and 'Sum of Sales' columns, as specified in the schema.",
+      "description": "Create measure named testMeasure13. \"Create a measure which will return yes if Year = 2019 else No where Sales > 1000\"",
+      "created_at": "2026-03-23T01:47:23.166654"
+    }
+  },
+  "calculated_columns": {},
+  "calculated_tables": {},
+  "ingestion_notes": [
+    "Default starter metadata",
+    "Learned table schema from CSV/TSV: Targets.csv",
+    "Learned table schema from CSV/TSV: SalesPersonRegion.csv",
+    "Learned table schema from CSV/TSV: SalesPerson.csv",
+    "Auto-detected 1 relationship(s): 0 high-confidence, 1 need review",
+    "Learned table schema from CSV/TSV: Sales.csv",
+    "Auto-detected 1 relationship(s): 0 high-confidence, 1 need review",
+    "Learned table schema from CSV/TSV: Region.csv",
+    "Auto-detected 1 relationship(s): 1 high-confidence, 0 need review",
+    "Learned table schema from CSV/TSV: Product.csv",
+    "Auto-detected 1 relationship(s): 1 high-confidence, 0 need review",
+    "Training completed at 2026-03-23T00:00:23.132333 with 0 expressions"
+  ],
+  "training_profile": {
+    "trained_at": "2026-03-23T00:00:23.132333",
+    "table_scores": {
+      "Sales": 6.5,
+      "Targets": 3.5,
+      "SalesPersonRegion": 1.5,
+      "SalesPerson": 1.5,
+      "Region": 1.5,
+      "Product": 1.5
+    },
+    "top_columns": [],
+    "top_functions": [],
+    "preferred_table": "Sales",
+    "preferred_value_column": null,
+    "preferred_date_column": "Sales.Year",
+    "numeric_column_count": 0,
+    "date_column_count": 8,
+    "text_column_count": 30,
+    "observed_expression_count": 0,
+    "feature_flags": {
+      "uses_time_intelligence": false,
+      "uses_calculate": false,
+      "uses_divide": false
+    }
+  },
+  "last_updated": "2026-03-23T01:47:23.166713"
+}

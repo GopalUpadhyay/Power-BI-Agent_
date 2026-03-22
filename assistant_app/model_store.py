@@ -49,6 +49,9 @@ class ModelStore:
         model_id = f"{self._slug(name)}-{now.replace(':', '').replace('-', '').replace('.', '')}"
         metadata_path = self.root / f"{model_id}.metadata.json"
 
+        # Ensure parent directory exists
+        metadata_path.parent.mkdir(parents=True, exist_ok=True)
+
         default_metadata = {
             "tables": {
                 "Sales": {
@@ -99,6 +102,8 @@ class ModelStore:
         if not model:
             return
         metadata_path = Path(model["metadata_path"])
+        # Ensure parent directory exists
+        metadata_path.parent.mkdir(parents=True, exist_ok=True)
         metadata_path.write_text(json.dumps(metadata, indent=2), encoding="utf-8")
 
     def _upsert_model(self, model_id: str, update: Dict[str, Any]) -> None:
