@@ -972,6 +972,7 @@ def run_ui() -> None:
 
     with tab_generate:
         st.subheader("Generate New Item")
+        st.info("💡 **Item Name is used as the name for all generated content** (DAX, SQL, PySpark, etc.)")
         with st.form("generate_form"):
             item_type = st.selectbox("Item Type", ["measure", "flag", "column", "table"], index=0)
             output_language = st.selectbox("Output Language", ["DAX", "SQL", "PySpark", "Python"], index=0)
@@ -980,7 +981,7 @@ def run_ui() -> None:
                 ["Semantic Model", "Warehouse", "Notebook", "Python Script"],
                 index=0,
             )
-            item_name = st.text_input("Item Name", placeholder="e.g. Sales Growth, Monthly Revenue")
+            item_name = st.text_input("Item Name (Required - will be the name of generated content)", placeholder="e.g. Total Sales, Customer Count, Monthly Revenue")
             description = st.text_input("Description", placeholder="Create month over month sales growth")
             conditions = st.text_input("Conditions (optional)", placeholder="where Sales > 1000")
             auto_register = st.checkbox("Auto-register item", value=True)
@@ -989,6 +990,8 @@ def run_ui() -> None:
         if submit:
             if not description.strip():
                 st.error("Description is required.")
+            elif not item_name.strip():
+                st.error("Item Name is required - it will be used as the name for the generated content.")
             else:
                 if output_language == "DAX" and usage_target == "Semantic Model":
                     result = agent.generate_item(
@@ -998,7 +1001,22 @@ def run_ui() -> None:
                         auto_register=auto_register,
                     )
 
-                    st.success(f"✓ Generated: {result['name']} ({result['item_type']})")
+                    # Use the item_name field as the final name for the generated content
+                    final_generated_name = item_name.strip()
+                    
+                    # Update the result with the custom name from item_name field
+                    result['name'] = final_generated_name
+                    
+                    # Re-register with the correct name if auto_register is enabled
+                    if auto_register:
+                        agent.registry.register(
+                            name=final_generated_name,
+                            item_type=result['item_type'],
+                            expression=result.get('expression', ''),
+                            description=description.strip()
+                        )
+
+                    st.success(f"✓ Generated and saved as: {final_generated_name} ({result['item_type']})")
 
                     if result["validation_errors"]:
                         st.warning("Validation issues found:")
@@ -1188,17 +1206,9 @@ def run_ui() -> None:
 
                     # Register the generated item in the registry so it appears in Created Items
                     if u_result and u_result.get("code"):
-                        # Use explicit item_name if provided, otherwise extract from description
-                        if item_name.strip():
-                            final_item_name = item_name.strip()
-                        else:
-                            # Extract from description (format: "Name: Description" or just "Name")
-                            parts = description.strip().split(":")
-                            final_item_name = parts[0].strip() if parts else description.strip()
-                            
-                            # Fallback to auto-generated name if still empty
-                            if not final_item_name:
-                                final_item_name = f"{item_type}_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
+                        # ALWAYS use the item_name field as the name for generated content
+                        # This ensures the user's custom name is applied to whatever is generated
+                        final_item_name = item_name.strip()
                         
                         agent.registry.register(
                             name=final_item_name,
@@ -1206,7 +1216,7 @@ def run_ui() -> None:
                             expression=u_result.get("code", ""),
                             description=description.strip() + f"\n({u_result.get('type', output_language)} for {usage_target})"
                         )
-                        st.success(f"✓ Saved to Created Items as '{final_item_name}'")
+                        st.success(f"✓ Saved to Created Items as '{final_item_name}' ({item_type})")
 
                     lang_map = {
                         "DAX": "sql",
