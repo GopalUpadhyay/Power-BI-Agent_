@@ -141,8 +141,69 @@ def _build_universal_assistant(api_key: str, metadata: Optional[Dict[str, Any]] 
 def run_ui() -> None:
     st.set_page_config(
         page_title="Power BI Semantic Model Assistant",
-        page_icon="PB",
+        page_icon="🤖",
         layout="wide",
+        initial_sidebar_state="expanded",
+    )
+
+    # Apply custom theme CSS to ensure colors display correctly
+    st.markdown(
+        """
+        <style>
+        /* Main theme colors */
+        :root {
+            --primary-color: #FF6B35;
+            --secondary-color: #F7931E;
+            --danger-color: #C1272D;
+        }
+        
+        /* Dark theme background */
+        .stApp {
+            background-color: #1a1a1a;
+        }
+        
+        /* Sidebar styling */
+        [data-testid="stSidebar"] {
+            background-color: #C1272D;
+            color: #FAFBFC;
+        }
+        
+        /* Button styling */
+        .stButton > button {
+            background-color: #FF6B35;
+            color: white;
+            border: none;
+            border-radius: 4px;
+            font-weight: bold;
+        }
+        
+        .stButton > button:hover {
+            background-color: #F7931E;
+            color: white;
+        }
+        
+        /* Title and header styling */
+        h1, h2, h3 {
+            color: #FF6B35;
+        }
+        
+        /* Input field styling */
+        .stTextInput > label, .stSelectbox > label {
+            color: #FAFBFC;
+        }
+        
+        /* Tab styling */
+        .stTabs > button {
+            color: #FAFBFC;
+        }
+        
+        .stTabs > button[aria-selected="true"] {
+            color: #FF6B35;
+            border-bottom-color: #FF6B35;
+        }
+        </style>
+        """,
+        unsafe_allow_html=True,
     )
 
     st.title("Power BI Semantic Model Assistant")
