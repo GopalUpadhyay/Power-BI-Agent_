@@ -162,13 +162,82 @@ def run_ui() -> None:
             background-color: #1a1a1a;
         }
         
-        /* Sidebar styling */
+        /* Sidebar styling - all elements */
         [data-testid="stSidebar"] {
-            background-color: #C1272D;
-            color: #FAFBFC;
+            background-color: #C1272D !important;
         }
         
-        /* Button styling */
+        /* Sidebar text, labels, and headers */
+        [data-testid="stSidebar"] h1,
+        [data-testid="stSidebar"] h2,
+        [data-testid="stSidebar"] h3,
+        [data-testid="stSidebar"] h4,
+        [data-testid="stSidebar"] label,
+        [data-testid="stSidebar"] p,
+        [data-testid="stSidebar"] span,
+        [data-testid="stSidebar"] div {
+            color: #FFFFFF !important;
+        }
+        
+        /* Sidebar input fields */
+        [data-testid="stSidebar"] .stTextInput input,
+        [data-testid="stSidebar"] .stNumberInput input,
+        [data-testid="stSidebar"] .stSelectbox select,
+        [data-testid="stSidebar"] [data-testid="stSelectbox"] {
+            background-color: #2d2d2d !important;
+            color: #FFFFFF !important;
+            border-color: #444 !important;
+        }
+        
+        /* Sidebar text input */
+        [data-testid="stSidebar"] input {
+            background-color: #2d2d2d !important;
+            color: #FFFFFF !important;
+            border: 1px solid #444 !important;
+        }
+        
+        [data-testid="stSidebar"] input::placeholder {
+            color: #999 !important;
+        }
+        
+        /* Sidebar select dropdown */
+        [data-testid="stSidebar"] select {
+            background-color: #2d2d2d !important;
+            color: #FFFFFF !important;
+        }
+        
+        /* Sidebar buttons */
+        [data-testid="stSidebar"] .stButton > button {
+            background-color: #FF6B35 !important;
+            color: #FFFFFF !important;
+            border: none !important;
+            border-radius: 4px !important;
+            font-weight: bold !important;
+            width: 100% !important;
+        }
+        
+        [data-testid="stSidebar"] .stButton > button:hover {
+            background-color: #F7931E !important;
+            color: #FFFFFF !important;
+        }
+        
+        /* Sidebar checkboxes and radio buttons */
+        [data-testid="stSidebar"] .stCheckbox label,
+        [data-testid="stSidebar"] .stRadio label {
+            color: #FFFFFF !important;
+        }
+        
+        /* Sidebar divider */
+        [data-testid="stSidebar"] hr {
+            border-color: #999 !important;
+        }
+        
+        /* Main content area */
+        .stApp {
+            background-color: #1a1a1a;
+        }
+        
+        /* Button styling - main area */
         .stButton > button {
             background-color: #FF6B35;
             color: white;
@@ -187,9 +256,21 @@ def run_ui() -> None:
             color: #FF6B35;
         }
         
-        /* Input field styling */
-        .stTextInput > label, .stSelectbox > label {
-            color: #FAFBFC;
+        /* Main content text color */
+        p, span, label, div {
+            color: #E0E0E0;
+        }
+        
+        /* Input field styling - main area */
+        input {
+            background-color: #2d2d2d !important;
+            color: #FFFFFF !important;
+            border-color: #444 !important;
+        }
+        
+        select {
+            background-color: #2d2d2d !important;
+            color: #FFFFFF !important;
         }
         
         /* Tab styling */
@@ -200,6 +281,12 @@ def run_ui() -> None:
         .stTabs > button[aria-selected="true"] {
             color: #FF6B35;
             border-bottom-color: #FF6B35;
+        }
+        
+        /* Cards and containers */
+        .stCard, [data-testid="stVerticalBlock"] {
+            background-color: #2d2d2d;
+            border-color: #444;
         }
         </style>
         """,
