@@ -1,7 +1,0 @@
-name,item_type,expression,description,source,created_at
-Create_total_sales_measure,measure,SUM(Sales[Sales]),Create total sales measure,generated,2026-03-18T22:29:08.353071
-Create_AI_pipeline_flag,flag,"IF(SUM(Sales[Sales]) > 1000, ""Yes"", ""No"")",Create AI pipeline flag,generated,2026-03-18T22:29:08.353735
-Create_month_over_month_sales_growth,measure,"VAR CurrentMonthSales = SUM(Sales[Sales])
-VAR PrevMonthSales = CALCULATE(SUM(Sales[Sales]), DATEADD(Sales[OrderDate], -1, MONTH))
-RETURN DIVIDE(CurrentMonthSales - PrevMonthSales, PrevMonthSales)",Create month over month sales growth,generated,2026-03-18T22:29:08.354264
-Create_top_5_products_table_by_total_sales,table,"TOPN(5, SUMMARIZE(Sales, Product[ProductName], ""Total_Sales"", SUM(Sales[Sales])), [Total_Sales], DESC)",Create top 5 products table by total sales,generated,2026-03-18T22:29:08.362894
