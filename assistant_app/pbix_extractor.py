@@ -20,6 +20,13 @@ class PBIXExtractor:
     }
 
     @staticmethod
+    def _clean_name(name: str) -> str:
+        """Clean Unicode artifacts from names (zero-width spaces, BOM markers, etc.)."""
+        if not name:
+            return name
+        return name.replace('\ufeff', '').replace('\u200b', '').replace('\u200c', '').replace('\u200d', '').strip()
+
+    @staticmethod
     def extract_metadata(pbix_file_path: str) -> Optional[Dict[str, Any]]:
         """
         Extract schema metadata from a PBIX or PBIT file.
@@ -78,19 +85,19 @@ class PBIXExtractor:
             
             # Find all tables in the model
             for table_elem in root.findall(".//tm:Table", PBIXExtractor.NAMESPACES):
-                table_name = table_elem.get("Name", "UnnamedTable")
+                table_name = PBIXExtractor._clean_name(table_elem.get("Name", "UnnamedTable"))
                 columns = {}
                 measures = {}
                 
                 # Extract columns
                 for col_elem in table_elem.findall(".//tm:Column", PBIXExtractor.NAMESPACES):
-                    col_name = col_elem.get("Name", "UnnamedColumn")
+                    col_name = PBIXExtractor._clean_name(col_elem.get("Name", "UnnamedColumn"))
                     col_type = col_elem.get("DataType", "string")
                     columns[col_name] = col_type
                 
                 # Extract measures
                 for measure_elem in table_elem.findall(".//tm:Measure", PBIXExtractor.NAMESPACES):
-                    measure_name = measure_elem.get("Name", "UnnamedMeasure")
+                    measure_name = PBIXExtractor._clean_name(measure_elem.get("Name", "UnnamedMeasure"))
                     expression = measure_elem.findtext(".//tm:Expression", "")
                     if expression:
                         measures[measure_name] = {
@@ -109,10 +116,10 @@ class PBIXExtractor:
             
             # Extract relationships
             for rel_elem in root.findall(".//tm:Relationship", PBIXExtractor.NAMESPACES):
-                from_table = rel_elem.findtext(".//tm:FromTable", "")
-                from_col = rel_elem.findtext(".//tm:FromColumn", "")
-                to_table = rel_elem.findtext(".//tm:ToTable", "")
-                to_col = rel_elem.findtext(".//tm:ToColumn", "")
+                from_table = PBIXExtractor._clean_name(rel_elem.findtext(".//tm:FromTable", ""))
+                from_col = PBIXExtractor._clean_name(rel_elem.findtext(".//tm:FromColumn", ""))
+                to_table = PBIXExtractor._clean_name(rel_elem.findtext(".//tm:ToTable", ""))
+                to_col = PBIXExtractor._clean_name(rel_elem.findtext(".//tm:ToColumn", ""))
                 
                 if from_table and from_col and to_table and to_col:
                     metadata["relationships"].append({
@@ -145,18 +152,18 @@ class PBIXExtractor:
             return None
         
         for table in tables:
-            table_name = table.get("name", "UnnamedTable")
+            table_name = PBIXExtractor._clean_name(table.get("name", "UnnamedTable"))
             columns = {}
             
             # Extract columns
             for column in table.get("columns", []):
-                col_name = column.get("name", "UnnamedColumn")
+                col_name = PBIXExtractor._clean_name(column.get("name", "UnnamedColumn"))
                 col_type = column.get("dataType", "string")
                 columns[col_name] = col_type
             
             # Extract measures
             for measure in table.get("measures", []):
-                measure_name = measure.get("name", "UnnamedMeasure")
+                measure_name = PBIXExtractor._clean_name(measure.get("name", "UnnamedMeasure"))
                 expression = measure.get("expression", "")
                 if expression:
                     metadata["measures"][measure_name] = {
@@ -175,10 +182,10 @@ class PBIXExtractor:
         relationships = model_data.get("relationships", [])
         if isinstance(relationships, list):
             for rel in relationships:
-                from_table = rel.get("fromTable", "")
-                from_col = rel.get("fromColumn", "")
-                to_table = rel.get("toTable", "")
-                to_col = rel.get("toColumn", "")
+                from_table = PBIXExtractor._clean_name(rel.get("fromTable", ""))
+                from_col = PBIXExtractor._clean_name(rel.get("fromColumn", ""))
+                to_table = PBIXExtractor._clean_name(rel.get("toTable", ""))
+                to_col = PBIXExtractor._clean_name(rel.get("toColumn", ""))
                 
                 if from_table and from_col and to_table and to_col:
                     metadata["relationships"].append({

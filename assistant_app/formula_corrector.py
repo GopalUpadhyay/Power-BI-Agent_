@@ -32,21 +32,23 @@ class SemanticColumnMatcher:
         for table_name, table_info in self.tables.items():
             columns = table_info.get("columns", {})
             for col_name in columns.keys():
-                col_lower = col_name.lower()
+                # Clean Unicode artifacts (zero-width spaces, BOM markers, etc.)
+                col_clean = col_name.replace('\ufeff', '').replace('\u200b', '').strip()
+                col_lower = col_clean.lower()
                 
                 # Check count/order columns FIRST (before ID) since they're more specific
                 if any(kw in col_lower for kw in self.COUNT_KEYWORDS):
-                    self.index["count"].append((table_name, col_name))
+                    self.index["count"].append((table_name, col_clean))
                 elif any(kw in col_lower for kw in self.AMOUNT_KEYWORDS):
-                    self.index["amount"].append((table_name, col_name))
+                    self.index["amount"].append((table_name, col_clean))
                 elif any(kw in col_lower for kw in self.COST_KEYWORDS):
-                    self.index["cost"].append((table_name, col_name))
+                    self.index["cost"].append((table_name, col_clean))
                 elif any(kw in col_lower for kw in self.ID_KEYWORDS):
-                    self.index["id"].append((table_name, col_name))
+                    self.index["id"].append((table_name, col_clean))
                 elif any(kw in col_lower for kw in self.DATE_KEYWORDS):
-                    self.index["date"].append((table_name, col_name))
+                    self.index["date"].append((table_name, col_clean))
                 else:
-                    self.index["other"].append((table_name, col_name))
+                    self.index["other"].append((table_name, col_clean))
     
     def find_column(self, semantic_type: str, prefer_table: str = None) -> Optional[Tuple[str, str]]:
         """Find column by semantic type. Returns (table, column)."""
