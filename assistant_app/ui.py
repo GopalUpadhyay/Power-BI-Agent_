@@ -282,36 +282,22 @@ def _display_generation_packet(item_type: str, output_language: str, usage_targe
         pass  # Silently fail - don't block generation
 
 
-def _infer_display_item_type(result: Dict[str, Any]) -> str:
-    """Infer a best-effort display type for demo results.
+def _detect_expression_type(expression: str) -> str:
+    """Best-effort detector for expression output kind from code shape."""
+    exp_low = str(expression or "").strip().lower()
+    if not exp_low:
+        return ""
 
-    Some legacy generator paths can return mismatched item_type labels in demo output.
-    This keeps UI labels aligned with the actual generated expression/request.
-    """
-    raw_type = str(result.get("item_type", "")).strip().lower()
-    expression = str(result.get("expression", ""))
-    description = str(result.get("description", "")).strip().lower()
-    exp_low = expression.lower()
-
-    # Prefer explicit request intent first.
-    if "table" in description:
+    if any(k in exp_low for k in ["create table", "saveastable(", "createorreplacetempview(", "select "]):
         return "table"
-    if "flag" in description:
+    if exp_low.startswith("topn(") or exp_low.startswith("summarize("):
+        return "table"
+    if "if(" in exp_low and any(k in exp_low for k in ["\"yes\"", "\"no\"", "true", "false"]):
         return "flag"
-    if "column" in description:
-        return "column"
-    if "measure" in description:
+    if any(k in exp_low for k in ["calculate(", "sum(", "average(", "count(", "distinctcount(", "dateadd("]):
         return "measure"
 
-    # Infer from generated expression patterns.
-    if any(k in exp_low for k in ["summarize(", "select ", "create table", "saveastable(", "createorreplacetempview("]):
-        return "table"
-    if "if(" in exp_low and any(k in exp_low for k in ["yes", "no", "true", "false"]):
-        return "flag"
-    if any(k in exp_low for k in ["calculate(", "sum(", "average(", "count(", "distinctcount(", "return"]):
-        return "measure"
-
-    return raw_type or "item"
+    return ""
 
 
 def _build_universal_assistant(api_key: str, metadata: Optional[Dict[str, Any]] = None):
@@ -1863,7 +1849,7 @@ NOW GENERATE THE {output_language} {item_type}:"""
 
     with tab_demo:
         st.subheader("Run Demo Scenario")
-        st.write("This will generate demo items (measure, flag, measure, table).")
+        st.write("This will generate demo items (measure, column, table, flag).")
 
         if "demo_results" not in st.session_state:
             st.session_state.demo_results = []
@@ -1872,17 +1858,17 @@ NOW GENERATE THE {output_language} {item_type}:"""
             demo_requests = [
                 {"item_type": "measure", "description": "Create total sales measure"},
                 {
-                    "item_type": "flag",
-                    "description": "Create AI pipeline flag",
-                    "conditions": "where Sales > 1000",
-                },
-                {
-                    "item_type": "measure",
-                    "description": "Create month over month sales growth",
+                    "item_type": "column",
+                    "description": "Create sales amount band column",
                 },
                 {
                     "item_type": "table",
                     "description": "Create top 5 products table by total sales",
+                },
+                {
+                    "item_type": "flag",
+                    "description": "Create AI pipeline flag",
+                    "conditions": "where Sales > 1000",
                 },
             ]
 
@@ -1905,8 +1891,15 @@ NOW GENERATE THE {output_language} {item_type}:"""
             st.markdown("---")
             st.write("**Created Items:**")
             for idx, result in enumerate(st.session_state.demo_results, start=1):
-                display_type = _infer_display_item_type(result)
-                st.write(f"[{idx}] {result['name']} ({display_type})")
+                requested_type = str(result.get("item_type", "item")).strip().lower()
+                detected_type = _detect_expression_type(result.get("expression", ""))
+                if detected_type and detected_type != requested_type:
+                    st.write(
+                        f"[{idx}] {result['name']} ({requested_type}) "
+                        f"- detected from expression: {detected_type}"
+                    )
+                else:
+                    st.write(f"[{idx}] {result['name']} ({requested_type})")
                 with st.expander(f"View Expression: {result['name']}", expanded=False):
                     st.code(result["expression"], language="sql")
                     st.write(result.get("explanation", ""))
