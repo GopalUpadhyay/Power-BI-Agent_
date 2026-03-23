@@ -282,6 +282,38 @@ def _display_generation_packet(item_type: str, output_language: str, usage_targe
         pass  # Silently fail - don't block generation
 
 
+def _infer_display_item_type(result: Dict[str, Any]) -> str:
+    """Infer a best-effort display type for demo results.
+
+    Some legacy generator paths can return mismatched item_type labels in demo output.
+    This keeps UI labels aligned with the actual generated expression/request.
+    """
+    raw_type = str(result.get("item_type", "")).strip().lower()
+    expression = str(result.get("expression", ""))
+    description = str(result.get("description", "")).strip().lower()
+    exp_low = expression.lower()
+
+    # Prefer explicit request intent first.
+    if "table" in description:
+        return "table"
+    if "flag" in description:
+        return "flag"
+    if "column" in description:
+        return "column"
+    if "measure" in description:
+        return "measure"
+
+    # Infer from generated expression patterns.
+    if any(k in exp_low for k in ["summarize(", "select ", "create table", "saveastable(", "createorreplacetempview("]):
+        return "table"
+    if "if(" in exp_low and any(k in exp_low for k in ["yes", "no", "true", "false"]):
+        return "flag"
+    if any(k in exp_low for k in ["calculate(", "sum(", "average(", "count(", "distinctcount(", "return"]):
+        return "measure"
+
+    return raw_type or "item"
+
+
 def _build_universal_assistant(api_key: str, metadata: Optional[Dict[str, Any]] = None):
     store = MetadataStore(metadata=metadata)
     client = configure_universal_client(api_key=api_key or None)
@@ -1873,7 +1905,8 @@ NOW GENERATE THE {output_language} {item_type}:"""
             st.markdown("---")
             st.write("**Created Items:**")
             for idx, result in enumerate(st.session_state.demo_results, start=1):
-                st.write(f"[{idx}] {result['name']} ({result['item_type']})")
+                display_type = _infer_display_item_type(result)
+                st.write(f"[{idx}] {result['name']} ({display_type})")
                 with st.expander(f"View Expression: {result['name']}", expanded=False):
                     st.code(result["expression"], language="sql")
                     st.write(result.get("explanation", ""))
