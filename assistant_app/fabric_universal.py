@@ -608,6 +608,11 @@ Generate code NOW using only the schema and parameters above:
     def generate_code(self, intent: Dict[str, Any], user_params: Dict[str, Any] = None) -> Dict[str, str]:
         # Default to deterministic, schema-driven generation unless explicitly enabled.
         use_llm = os.getenv("FABRIC_ASSISTANT_USE_LLM", "0") == "1"
+
+        if isinstance(user_params, dict):
+            requested_name = str(user_params.get("item_name", "")).strip()
+            if requested_name:
+                intent["_item_name"] = requested_name
         
         # DEBUG: log what's happening
         print(f"🔵 generate_code: use_llm={use_llm}, client={self.client is not None}, has user_params={user_params is not None}", flush=True)
@@ -662,6 +667,11 @@ Generate code NOW using only the schema and parameters above:
             available_cols = list(tables[ref_table].get("columns", {}).keys())
             if not available_cols:
                 return False, f"Table '{ref_table}' has no columns defined in schema"
+
+        # Validate datatype usage before accepting generated output.
+        dtype_ok, dtype_error = self._validate_datatype_usage(code, referenced_tables)
+        if not dtype_ok:
+            return False, dtype_error
         
         # Check intent alignment
         request_text = intent.get("raw", "").lower()
@@ -680,9 +690,74 @@ Generate code NOW using only the schema and parameters above:
             "distinctcount",
         ]
         if any(token in request_text for token in aggregation_triggers):
-            if not any(kw in code_content for kw in ["sum(", "avg(", "average(", "count(", "distinctcount(", "calculate(", "divide("]):
+            if not any(
+                kw in code_content
+                for kw in [
+                    "sum(",
+                    "sumx(",
+                    "avg(",
+                    "average(",
+                    "averagex(",
+                    "count(",
+                    "countx(",
+                    "distinctcount(",
+                    "min(",
+                    "minx(",
+                    "max(",
+                    "maxx(",
+                    "calculate(",
+                    "divide(",
+                ]
+            ):
                 return False, "Intent mentions aggregation but generated code doesn't use aggregation functions"
         
+        return True, ""
+
+    def _validate_datatype_usage(self, code: str, referenced_tables: List[str]) -> tuple[bool, str]:
+        """Validate basic literal usage against schema datatypes."""
+        if not code.strip():
+            return False, "Generated code is empty"
+
+        numeric_hints = ["int", "bigint", "double", "float", "decimal", "number"]
+        bool_hints = ["bool", "boolean"]
+        date_hints = ["date", "datetime", "timestamp", "time"]
+
+        for table_name in referenced_tables:
+            cols = (self.context_builder.metadata.get("tables", {}).get(table_name, {}) or {}).get("columns", {})
+            if not isinstance(cols, dict):
+                continue
+
+            for col_name, dtype in cols.items():
+                dtype_low = str(dtype).lower()
+                col_escaped = re.escape(str(col_name))
+
+                # Numeric columns should not be compared to quoted numbers.
+                if any(h in dtype_low for h in numeric_hints):
+                    bad_numeric_patterns = [
+                        rf"\[{col_escaped}\]\s*(=|<>|!=|>|<|>=|<=)\s*['\"][-+]?\d+(?:\.\d+)?['\"]",
+                        rf"\b{col_escaped}\b\s*(=|<>|!=|>|<|>=|<=)\s*['\"][-+]?\d+(?:\.\d+)?['\"]",
+                    ]
+                    if any(re.search(p, code, flags=re.IGNORECASE) for p in bad_numeric_patterns):
+                        return False, f"Column '{col_name}' is numeric ({dtype}) but is compared with quoted numeric literal"
+
+                # Boolean columns should not use quoted true/false values.
+                if any(h in dtype_low for h in bool_hints):
+                    bad_bool_patterns = [
+                        rf"\[{col_escaped}\]\s*(=|<>|!=)\s*['\"](?:true|false|yes|no|0|1)['\"]",
+                        rf"\b{col_escaped}\b\s*(=|<>|!=)\s*['\"](?:true|false|yes|no|0|1)['\"]",
+                    ]
+                    if any(re.search(p, code, flags=re.IGNORECASE) for p in bad_bool_patterns):
+                        return False, f"Column '{col_name}' is boolean ({dtype}) but is compared with quoted boolean literal"
+
+                # Date columns should not be compared to bare numerics.
+                if any(h in dtype_low for h in date_hints):
+                    bad_date_patterns = [
+                        rf"\[{col_escaped}\]\s*(=|<>|!=|>|<|>=|<=)\s*\d+",
+                        rf"\b{col_escaped}\b\s*(=|<>|!=|>|<|>=|<=)\s*\d+",
+                    ]
+                    if any(re.search(p, code, flags=re.IGNORECASE) for p in bad_date_patterns):
+                        return False, f"Column '{col_name}' is date/time ({dtype}) but is compared with bare numeric literal"
+
         return True, ""
     
     def _generate_with_llm(self, intent: Dict[str, Any]) -> Optional[Dict[str, str]]:
@@ -715,6 +790,7 @@ Generate code NOW using only the schema and parameters above:
                     f"──────────────────────────────────────────────────────────────────────────────────\n"
                     f"✓ ONLY use these tables: {table_list}\n"
                     f"✓ ONLY use columns that exist in these tables (shown in schema above)\n"
+                    f"✓ ALWAYS respect data types from schema (numeric/date/boolean must be used correctly)\n"
                     f"✓ ONLY use these relationships for joins:\n{rel_list if rel_list else '  (none defined)'}\n"
                     f"✓ NEVER invent, assume, or hallucinate table/column names\n"
                     f"✓ NEVER reference tables/columns not in the schema above\n"
@@ -824,6 +900,7 @@ Generate code NOW using only the schema and parameters above:
             
             # Determine code type based on intent
             code_type = _map_intent_to_type(intent["output_type"])
+            c = self._finalize_table_creation_output(c, code_type, intent)
             
             return {
                 "type": code_type,
@@ -884,8 +961,9 @@ Generate code NOW using only the schema and parameters above:
 
         if t in {"dax_measure", "dax_column", "dax_table"}:
             if t == "dax_table" or action == "create_table":
+                table_out_name = self._requested_item_name(intent) or "CalculatedTable"
                 code = (
-                    f"SUMMARIZE({table_name}, {table_name}[{group_col}], "
+                    f"{table_out_name} = SUMMARIZE({table_name}, {table_name}[{group_col}], "
                     f"\"Metric\", {self._dax_agg(agg_kind, table_name, value_col)})"
                 )
                 return {"type": "DAX", "code": code, "explanation": "Creates a calculated table grouped by a business attribute."}
@@ -913,11 +991,16 @@ Generate code NOW using only the schema and parameters above:
                     ).strip(),
                 }
             if action in {"create_table", "group_aggregate"}:
-                code = (
+                out_name = self._requested_item_name(intent)
+                select_stmt = (
                     f"SELECT {group_col}, {self._sql_agg(agg_kind, value_col)} AS metric\n"
                     f"FROM {table_name}\n"
-                    f"GROUP BY {group_col};"
+                    f"GROUP BY {group_col}"
                 )
+                if out_name:
+                    code = f"CREATE OR REPLACE TABLE {out_name} AS\n{select_stmt};"
+                else:
+                    code = f"{select_stmt};"
             elif "total" in req or agg_kind in {"sum", "avg"}:
                 code = f"SELECT {self._sql_agg(agg_kind, value_col)} AS metric FROM {table_name};"
             else:
@@ -936,10 +1019,12 @@ Generate code NOW using only the schema and parameters above:
                     ).strip(),
                 }
             if action in {"create_table", "group_aggregate"}:
+                out_name = self._requested_item_name(intent) or "result_table"
                 code = (
                     f"result_df = df.groupBy('{group_col}').{self._pyspark_agg(agg_kind)}('{value_col}')"
                     f".withColumnRenamed('{self._spark_result_col(agg_kind, value_col)}', 'metric')\n"
-                    "result_df.createOrReplaceTempView('result_table')"
+                    f"result_df.createOrReplaceTempView('{out_name}')\n"
+                    f"result_df.write.mode('overwrite').saveAsTable('{out_name}')"
                 )
             elif "total" in req or agg_kind in {"sum", "avg"}:
                 code = (
@@ -952,6 +1037,62 @@ Generate code NOW using only the schema and parameters above:
 
         code = "def transform(records):\n    return records"
         return {"type": "Python", "code": code, "explanation": "Returns generic Python logic."}
+
+    @staticmethod
+    def _requested_item_name(intent: Dict[str, Any]) -> str:
+        return str(intent.get("_item_name", "")).strip()
+
+    def _is_table_creation_request(self, intent: Dict[str, Any]) -> bool:
+        raw = str(intent.get("raw", "")).lower()
+        action = str(intent.get("action", "")).lower()
+        output_type = str(intent.get("output_type", "")).lower()
+        return (
+            action in {"create_table", "denormalize_join", "group_aggregate"}
+            or output_type == "dax_table"
+            or ("create" in raw and "table" in raw)
+        )
+
+    def _finalize_table_creation_output(self, code: str, generated_type: str, intent: Dict[str, Any]) -> str:
+        """Append save/create statements for table outputs using requested item name."""
+        item_name = self._requested_item_name(intent)
+        if not item_name or not self._is_table_creation_request(intent):
+            return code
+
+        c = code.strip()
+        gt = (generated_type or "").strip().lower()
+
+        if gt == "pyspark":
+            lowered = c.lower()
+            if (
+                f"saveastable('{item_name.lower()}')" in lowered
+                or f'createorreplacetempview("{item_name.lower()}")' in lowered
+                or f"createorreplacetempview('{item_name.lower()}')" in lowered
+            ):
+                return c
+
+            vars_found = re.findall(r"(?m)^\s*([A-Za-z_][A-Za-z0-9_]*)\s*=", c)
+            df_var = vars_found[-1] if vars_found else "result_df"
+            return (
+                f"{c}\n\n"
+                f"# Persist final table using requested item name\n"
+                f"{df_var}.createOrReplaceTempView('{item_name}')\n"
+                f"{df_var}.write.mode('overwrite').saveAsTable('{item_name}')"
+            )
+
+        if gt == "sql":
+            lowered = c.lower()
+            if "create table" in lowered and item_name.lower() in lowered:
+                return c
+
+            select_sql = c.rstrip(";")
+            return f"CREATE OR REPLACE TABLE {item_name} AS\n{select_sql};"
+
+        if gt == "dax":
+            if c.lower().startswith(f"{item_name.lower()} "):
+                return c
+            return f"{item_name} = {c}"
+
+        return c
 
     def _pick_core_columns(self) -> Tuple[str, str, Optional[str]]:
         tables = self.metadata.get("tables", {}) if isinstance(self.metadata, dict) else {}
