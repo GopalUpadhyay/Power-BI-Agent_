@@ -1,6 +1,7 @@
 """Power BI PBIX/PBIT file extractor - Extracts metadata from Power BI model files."""
 
 import json
+import re
 import zipfile
 import logging
 from pathlib import Path
@@ -65,6 +66,66 @@ class PBIXExtractor:
         return None
 
     @staticmethod
+    def _extract_from_report_layout(zip_ref: zipfile.ZipFile) -> Optional[Dict[str, Any]]:
+        """Best-effort fallback for binary PBIX: infer schema from Report/Layout query refs.
+
+        This does not recover full tabular metadata but can recover many table/column names
+        used by report visuals, which is enough to train generation context.
+        """
+        try:
+            files = zip_ref.namelist()
+            layout_member = PBIXExtractor._find_member(
+                files,
+                ["Report/Layout", "report/layout", "Layout"],
+            )
+            if not layout_member:
+                return None
+
+            raw = zip_ref.read(layout_member)
+            text = None
+            for encoding in ("utf-16-le", "utf-8-sig", "utf-8", "latin-1"):
+                try:
+                    text = raw.decode(encoding, errors="ignore")
+                    if text and len(text) > 50:
+                        break
+                except Exception:
+                    continue
+
+            if not text:
+                return None
+
+            # Query refs are often like "Sales[Amount]" or "'Date'[Year]".
+            pattern = re.compile(r"'?(?P<table>[A-Za-z0-9_\- ]+)'?\[(?P<column>[^\]]+)\]")
+            tables: Dict[str, Dict[str, Any]] = {}
+
+            for match in pattern.finditer(text):
+                table = PBIXExtractor._clean_name(match.group("table"))
+                column = PBIXExtractor._clean_name(match.group("column"))
+                if not table or not column:
+                    continue
+                if table.lower() in {"measures", "__measures"}:
+                    continue
+
+                entry = tables.setdefault(table, {"columns": {}, "column_count": 0})
+                entry["columns"][column] = "string"
+
+            for info in tables.values():
+                info["column_count"] = len(info["columns"])
+
+            if not tables:
+                return None
+
+            return {
+                "tables": tables,
+                "relationships": [],
+                "measures": {},
+                "calculated_columns": {},
+            }
+        except Exception as e:
+            logger.warning(f"Fallback layout extraction failed: {str(e)}")
+            return None
+
+    @staticmethod
     def extract_metadata(pbix_file_path: str) -> Optional[Dict[str, Any]]:
         """
         Extract schema metadata from a PBIX or PBIT file.
@@ -97,6 +158,16 @@ class PBIXExtractor:
                 xml_result = PBIXExtractor._extract_from_xml(zip_ref)
                 if xml_result and xml_result.get("tables"):
                     return xml_result
+
+                # Fallback for binary DataModel PBIX: infer schema from report layout.
+                layout_result = PBIXExtractor._extract_from_report_layout(zip_ref)
+                if layout_result and layout_result.get("tables"):
+                    notes = layout_result.setdefault("ingestion_notes", [])
+                    notes.append(
+                        "Recovered schema from Report/Layout (binary DataModel fallback). "
+                        "Relationships and hidden fields may be incomplete."
+                    )
+                    return layout_result
 
                 # Many PBIX files contain a binary DataModel that cannot be parsed without
                 # external engines. At this point extraction is unsupported, but file is valid.
