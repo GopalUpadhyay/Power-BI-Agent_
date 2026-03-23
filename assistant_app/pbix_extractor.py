@@ -126,6 +126,112 @@ class PBIXExtractor:
             return None
 
     @staticmethod
+    def _extract_from_textual_members(zip_ref: zipfile.ZipFile) -> Optional[Dict[str, Any]]:
+        """Scan textual PBIX members for schema clues (binary DataModel fallback).
+
+        Looks for common patterns used in report payloads and mashup metadata:
+        - Table[Column]
+        - "Entity":"Table" with "Property":"Column"
+        - Power Query shared query names
+        """
+        files = zip_ref.namelist()
+
+        # Prioritize files that usually contain semantic references.
+        candidates = [
+            f
+            for f in files
+            if any(
+                token in f.lower()
+                for token in ["report/layout", "report/metadata", "datamashup", "diagramstate", "metadata"]
+            )
+        ]
+
+        if not candidates:
+            candidates = files[:20]
+
+        table_to_cols: Dict[str, set[str]] = {}
+
+        def add_col(table_name: str, col_name: str) -> None:
+            t = PBIXExtractor._clean_name(table_name)
+            c = PBIXExtractor._clean_name(col_name)
+            if not t or not c:
+                return
+            if t.lower() in {"measures", "__measures"}:
+                return
+            table_to_cols.setdefault(t, set()).add(c)
+
+        for member in candidates:
+            try:
+                raw = zip_ref.read(member)
+            except Exception:
+                continue
+
+            text = None
+            for enc in ("utf-16-le", "utf-16", "utf-8-sig", "utf-8", "latin-1"):
+                try:
+                    text = raw.decode(enc, errors="ignore")
+                    if text and len(text) > 20:
+                        break
+                except Exception:
+                    continue
+
+            if not text:
+                continue
+
+            # Pattern 1: Table[Column] references.
+            for m in re.finditer(r"'?(?P<table>[A-Za-z0-9_\- ]+)'?\[(?P<column>[^\]]+)\]", text):
+                add_col(m.group("table"), m.group("column"))
+
+            # Pattern 2: JSON entity/property pairs (common in visual query payloads).
+            for m in re.finditer(
+                r'"Entity"\s*:\s*"(?P<table>[^"]+)"[^\}\n]{0,300}?"Property"\s*:\s*"(?P<column>[^"]+)"',
+                text,
+                flags=re.IGNORECASE,
+            ):
+                add_col(m.group("table"), m.group("column"))
+
+            # Pattern 3: escaped JSON entity/property pairs (e.g. \"Entity\":\"Sales\").
+            for m in re.finditer(
+                r'\\"Entity\\"\s*:\s*\\"(?P<table>[^\\"]+)\\"[^\n]{0,400}?\\"Property\\"\s*:\s*\\"(?P<column>[^\\"]+)\\"',
+                text,
+                flags=re.IGNORECASE,
+            ):
+                add_col(m.group("table"), m.group("column"))
+
+            # Pattern 4: Power Query shared query names - create minimal table if nothing else is known.
+            for m in re.finditer(r"\bshared\s+([A-Za-z_][A-Za-z0-9_ ]*)\s*=", text, flags=re.IGNORECASE):
+                q_name = PBIXExtractor._clean_name(m.group(1))
+                if q_name and q_name.lower() not in {"section1", "query", "source"}:
+                    table_to_cols.setdefault(q_name, set()).add("Value")
+
+        if not table_to_cols:
+            return None
+
+        tables: Dict[str, Dict[str, Any]] = {}
+        for table_name, cols in table_to_cols.items():
+            cleaned_cols = sorted(c for c in cols if c)
+            if not cleaned_cols:
+                continue
+            tables[table_name] = {
+                "columns": {c: "string" for c in cleaned_cols},
+                "column_count": len(cleaned_cols),
+            }
+
+        if not tables:
+            return None
+
+        return {
+            "tables": tables,
+            "relationships": [],
+            "measures": {},
+            "calculated_columns": {},
+            "ingestion_notes": [
+                "Recovered schema by scanning report/mashup textual artifacts (binary DataModel fallback).",
+                "Relationships and measure expressions may be incomplete.",
+            ],
+        }
+
+    @staticmethod
     def extract_metadata(pbix_file_path: str) -> Optional[Dict[str, Any]]:
         """
         Extract schema metadata from a PBIX or PBIT file.
@@ -168,6 +274,11 @@ class PBIXExtractor:
                         "Relationships and hidden fields may be incomplete."
                     )
                     return layout_result
+
+                # Broader text scan fallback for binary PBIX payloads.
+                textual_result = PBIXExtractor._extract_from_textual_members(zip_ref)
+                if textual_result and textual_result.get("tables"):
+                    return textual_result
 
                 # Many PBIX files contain a binary DataModel that cannot be parsed without
                 # external engines. At this point extraction is unsupported, but file is valid.
