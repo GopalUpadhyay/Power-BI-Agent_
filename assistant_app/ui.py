@@ -1,4 +1,5 @@
 import csv
+import hashlib
 import json
 import logging
 from datetime import datetime
@@ -25,6 +26,18 @@ from .model_store import ModelStore
 from .training_engine import FabricModelTrainer
 
 logger = logging.getLogger(__name__)
+
+
+def _context_fingerprint(summary: Dict[str, Any], context: str) -> str:
+    """Create a short, stable fingerprint for model context parity checks."""
+    try:
+        table_count = int(summary.get("table_count", 0))
+        col_count = int(summary.get("total_columns", 0))
+        rel_count = int(summary.get("relationship_count", 0))
+        payload = f"{table_count}|{col_count}|{rel_count}|{context}".encode("utf-8", errors="ignore")
+        return hashlib.sha256(payload).hexdigest()[:12]
+    except Exception:
+        return "unavailable"
 
 
 def _items_to_dataframe(items: List[Dict[str, Any]]) -> pd.DataFrame:
@@ -141,6 +154,7 @@ def _refresh_model_context_automatically(active_model: Dict[str, Any], model_sto
             # No tables yet - clear cached context
             st.session_state.model_context_cache = None
             st.session_state.model_context_summary = None
+            st.session_state.model_context_fingerprint = None
             return
         
         # Build comprehensive context
@@ -151,12 +165,14 @@ def _refresh_model_context_automatically(active_model: Dict[str, Any], model_sto
         # Cache in session state (persists across reruns)
         st.session_state.model_context_cache = comprehensive_context
         st.session_state.model_context_summary = summary
+        st.session_state.model_context_fingerprint = _context_fingerprint(summary, comprehensive_context)
         st.session_state.model_context_model_id = active_model["id"]
         
     except Exception as e:
         # Silently fail - don't block UI if context generation fails
         st.session_state.model_context_cache = None
         st.session_state.model_context_summary = None
+        st.session_state.model_context_fingerprint = None
 
 
 def _display_model_context_automatically(context_title: str = "🧠 LLM Context (What Groq will see)") -> bool:
@@ -167,6 +183,7 @@ def _display_model_context_automatically(context_title: str = "🧠 LLM Context 
     try:
         summary = st.session_state.get("model_context_summary")
         context = st.session_state.get("model_context_cache")
+        fingerprint = st.session_state.get("model_context_fingerprint")
         
         if not summary or not context:
             return False
@@ -184,6 +201,9 @@ def _display_model_context_automatically(context_title: str = "🧠 LLM Context 
                 st.metric("🔗 Relationships", summary["relationship_count"])
             with col5:
                 st.metric("⚙️  Calc Columns", summary["calculated_column_count"])
+
+            if fingerprint:
+                st.caption(f"Context fingerprint: {fingerprint}")
             
             st.write("**Available tables:**")
             table_info = ", ".join([f"{t} ({len(cols)} cols)" for t, cols in summary["tables"].items()])
@@ -205,6 +225,7 @@ def _display_generation_packet(item_type: str, output_language: str, usage_targe
     try:
         summary = st.session_state.get("model_context_summary")
         context = st.session_state.get("model_context_cache")
+        fingerprint = st.session_state.get("model_context_fingerprint")
         
         if not summary or not context:
             return
@@ -243,6 +264,9 @@ def _display_generation_packet(item_type: str, output_language: str, usage_targe
                 st.metric("Measures", summary["measure_count"])
             with col5:
                 st.metric("Calc Cols", summary["calculated_column_count"])
+
+            if fingerprint:
+                st.caption(f"Context fingerprint: {fingerprint}")
             
             # Part 4: Available Tables
             st.write("### 📋 **Part 4: Available Tables in Model**")
@@ -1393,6 +1417,10 @@ NOW GENERATE THE {output_language} {item_type}:"""
                             st.code(u_result.get("code", ""), language=lang_map.get(u_result.get("type", "Python"), "text"))
                             st.write("**Explanation**")
                             st.write(u_result.get("explanation", ""))
+
+                            model_used = u_result.get("model_used")
+                            if model_used:
+                                st.caption(f"Model used: {model_used} | Temperature: {os.getenv('GROQ_TEMPERATURE', '0')}")
 
                             st.write("**Paste-Ready Query/Script**")
                             st.code(

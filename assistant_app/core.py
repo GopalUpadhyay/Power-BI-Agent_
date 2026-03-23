@@ -56,6 +56,19 @@ def _groq_model_candidates() -> List[str]:
     return models
 
 
+def _groq_temperature() -> float:
+    """Return Groq sampling temperature with safe bounds.
+
+    Default is 0 for reproducible responses across environments.
+    """
+    raw_value = os.getenv("GROQ_TEMPERATURE", "0").strip()
+    try:
+        value = float(raw_value)
+    except Exception:
+        return 0.0
+    return max(0.0, min(2.0, value))
+
+
 class SparkDataLoader:
     """Load semantic-model table metadata from Spark when available."""
 
@@ -420,7 +433,7 @@ class DAXGenerationEngine:
                             },
                             {"role": "user", "content": prompt},
                         ],
-                        temperature=0.2,
+                        temperature=_groq_temperature(),
                         max_tokens=700,
                     )
                     break

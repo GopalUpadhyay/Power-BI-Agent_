@@ -80,6 +80,19 @@ def _groq_model_candidates() -> List[str]:
     return models
 
 
+def _groq_temperature() -> float:
+    """Return Groq sampling temperature with safe defaults.
+
+    Lower values reduce randomness and improve parity between environments.
+    """
+    raw_value = os.getenv("GROQ_TEMPERATURE", "0").strip()
+    try:
+        value = float(raw_value)
+    except Exception:
+        return 0.0
+    return max(0.0, min(2.0, value))
+
+
 class MetadataStore:
     """Persistent learning store for discovered model metadata."""
 
@@ -703,12 +716,13 @@ Generate code NOW using only the schema and parameters above:
                 )
             
             res = None
+            selected_model = ""
             last_error: Optional[Exception] = None
             for model_name in _groq_model_candidates():
                 try:
                     res = self.client.chat.completions.create(
                         model=model_name,
-                        temperature=0.1,
+                        temperature=_groq_temperature(),
                         max_tokens=2000,
                         messages=[
                             {
@@ -730,6 +744,7 @@ Generate code NOW using only the schema and parameters above:
                             {"role": "user", "content": prompt},
                         ],
                     )
+                    selected_model = model_name
                     break
                 except Exception as model_exc:
                     last_error = model_exc
@@ -753,7 +768,8 @@ Generate code NOW using only the schema and parameters above:
                     "type": "ERROR",
                     "code": "",
                     "explanation": "❌ Groq returned an empty response. This might be a provider-side filter issue.",
-                    "raw_response": raw_response
+                    "raw_response": raw_response,
+                    "model_used": selected_model,
                 }
             
             # Extract code: Since we instructed the model to return ONLY code,
@@ -770,7 +786,8 @@ Generate code NOW using only the schema and parameters above:
                     "type": "ERROR",
                     "code": "",
                     "explanation": f"❌ Could not extract code from Groq response. Raw response:\n{raw_response}",
-                    "raw_response": raw_response
+                    "raw_response": raw_response,
+                    "model_used": selected_model,
                 }
             
             # ===== Validate generated code against schema =====
@@ -781,7 +798,8 @@ Generate code NOW using only the schema and parameters above:
                     "type": "ERROR",
                     "code": c,
                     "explanation": f"⚠️ Generated code validation failed: {error_msg}\n\n**What was generated:** {c}",
-                    "raw_response": raw_response
+                    "raw_response": raw_response,
+                    "model_used": selected_model,
                 }
             
             # Determine code type based on intent
@@ -791,7 +809,8 @@ Generate code NOW using only the schema and parameters above:
                 "type": code_type,
                 "code": c,
                 "explanation": f"Generated {code_type} {intent.get('item_type', 'code')} named '{intent.get('raw', 'item').split()[-1] if intent.get('raw') else 'item'}'.",
-                "raw_response": raw_response
+                "raw_response": raw_response,
+                "model_used": selected_model,
             }
         except Exception as exc:
             # Report the actual error instead of silently returning None
