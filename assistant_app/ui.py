@@ -629,6 +629,8 @@ def run_ui() -> None:
         force_reload = True
 
     active_model = model_map[st.session_state.active_model_id]
+    # Normalize legacy/placeholder column dtypes before using metadata in context/generation.
+    model_store.refresh_inferred_types(active_model["id"])
     active_metadata = model_store.load_metadata(active_model["id"])
 
     if "agent" not in st.session_state or force_reload or st.session_state.get("agent_model_id") != active_model["id"]:

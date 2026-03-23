@@ -287,6 +287,8 @@ class ModelStore:
         name_lower = str(column_name).lower()
         if any(k in name_lower for k in ["year", "month", "day", "quarter", "week"]):
             return "bigint"
+        if any(k in name_lower for k in ["id", "key", "identifier"]):
+            return "bigint"
         if any(k in name_lower for k in ["date", "timestamp", "time"]):
             return "date"
         if any(k in name_lower for k in ["amount", "price", "cost", "sales", "revenue", "total", "rate", "percent", "qty", "quantity"]):
@@ -333,6 +335,92 @@ class ModelStore:
         if date_hits / total >= 0.8:
             return "date"
         return "string"
+
+    def _normalize_dtype_token(self, column_name: str, dtype_value: Any) -> str:
+        """Normalize heterogeneous dtype tokens into model-friendly types."""
+        raw = str(dtype_value or "").strip().lower()
+
+        if any(k in raw for k in ["bool", "boolean"]):
+            return "boolean"
+        if any(k in raw for k in ["int", "bigint", "smallint", "tinyint"]):
+            return "bigint"
+        if any(k in raw for k in ["float", "double", "decimal", "numeric", "real"]):
+            return "double"
+        if any(k in raw for k in ["date", "datetime", "timestamp", "time"]):
+            return "date"
+
+        # Unknown/object/string-like types get semantic fallback from column name.
+        return self._infer_type_from_values(column_name, [])
+
+    def refresh_inferred_types(self, model_id: str) -> Dict[str, Any]:
+        """Upgrade/repair stored column dtypes using file samples + semantic inference.
+
+        This is safe to run repeatedly and helps legacy models that still store all columns as string.
+        """
+        model = self.get_model(model_id)
+        if not model:
+            return {"updated": 0, "tables": 0}
+
+        metadata = self.load_metadata(model_id)
+        if not metadata:
+            return {"updated": 0, "tables": 0}
+
+        tables = metadata.get("tables", {}) if isinstance(metadata.get("tables", {}), dict) else {}
+        uploads = model.get("uploads", []) if isinstance(model.get("uploads", []), list) else []
+
+        # Map table stem -> file path for CSV/TSV uploads.
+        sample_sources: Dict[str, Path] = {}
+        for up in uploads:
+            stored = str(up.get("stored_path", "")).strip()
+            filename = str(up.get("filename", "")).strip()
+            if not stored or not filename:
+                continue
+            path = Path(stored)
+            if not path.exists():
+                continue
+            suffix = path.suffix.lower()
+            if suffix in {".csv", ".tsv"}:
+                sample_sources[path.stem.lower()] = path
+
+        updated = 0
+        touched_tables = 0
+
+        for table_name, table_info in tables.items():
+            if not isinstance(table_info, dict):
+                continue
+            cols = table_info.get("columns", {})
+            if not isinstance(cols, dict) or not cols:
+                continue
+
+            sample_inferred: Dict[str, str] = {}
+            sample_path = sample_sources.get(str(table_name).lower())
+            if sample_path is not None:
+                delim = "\t" if sample_path.suffix.lower() == ".tsv" else ","
+                sample_inferred = self._infer_columns_from_delimited(sample_path, delim)
+
+            changed_any = False
+            normalized_cols: Dict[str, str] = {}
+            for col_name, dtype in cols.items():
+                inferred_from_sample = sample_inferred.get(col_name)
+                new_type = inferred_from_sample or self._normalize_dtype_token(col_name, dtype)
+                normalized_cols[col_name] = new_type
+                if str(dtype) != str(new_type):
+                    updated += 1
+                    changed_any = True
+
+            if changed_any:
+                table_info["columns"] = normalized_cols
+                table_info["column_count"] = len(normalized_cols)
+                touched_tables += 1
+
+        if updated > 0:
+            notes = metadata.setdefault("ingestion_notes", [])
+            notes.append(
+                f"Refreshed inferred data types: updated {updated} column(s) across {touched_tables} table(s)"
+            )
+            self.save_metadata(model_id, metadata)
+
+        return {"updated": updated, "tables": touched_tables}
 
     def _merge_metadata(self, base: Dict[str, Any], incoming: Dict[str, Any]) -> Dict[str, Any]:
         result = dict(base)
