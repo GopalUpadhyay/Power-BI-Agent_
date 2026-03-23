@@ -664,13 +664,24 @@ Generate code NOW using only the schema and parameters above:
                 return False, f"Table '{ref_table}' has no columns defined in schema"
         
         # Check intent alignment
-        intent_keywords = intent.get("raw", "").lower().split()
+        request_text = intent.get("raw", "").lower()
         code_content = code.lower()
-        
-        # Basic alignment check - at least some keywords should appear in code comments or structure
-        if any(k in ["sum", "total", "aggregate", "avg", "count", "measure"] for k in intent_keywords):
-            if not any(kw in code_content for kw in ["sum", "avg", "average", "count", "calculate", "distinctcount", "divide"]):
-                return False, f"Intent mentions aggregation but generated code doesn't use aggregation functions"
+
+        # Enforce aggregation only when request explicitly asks for aggregated output.
+        # Do NOT treat generic "measure" requests as aggregation-only; boolean/flag measures are valid.
+        aggregation_triggers = [
+            "sum",
+            "total",
+            "aggregate",
+            "avg",
+            "average",
+            "count",
+            "distinct count",
+            "distinctcount",
+        ]
+        if any(token in request_text for token in aggregation_triggers):
+            if not any(kw in code_content for kw in ["sum(", "avg(", "average(", "count(", "distinctcount(", "calculate(", "divide("]):
+                return False, "Intent mentions aggregation but generated code doesn't use aggregation functions"
         
         return True, ""
     
@@ -772,13 +783,22 @@ Generate code NOW using only the schema and parameters above:
                     "model_used": selected_model,
                 }
             
-            # Extract code: Since we instructed the model to return ONLY code,
-            # treat entire response as code, just remove markdown wrappers if present
+            # Extract code from the response. Some models may still return
+            # TYPE/CODE/EXPLANATION wrappers despite instructions.
             c = raw_response.strip()
             
             # Remove markdown code fences if present
             c = re.sub(r'^```(?:dax|sql|python|pyspark)?\n', '', c, flags=re.I).lstrip()
             c = re.sub(r'\n```$', '', c).rstrip()
+
+            # If wrapped format is returned, isolate only the CODE block.
+            wrapped_match = re.search(r"(?is)\bCODE\s*:\s*(.*?)(?:\n\s*EXPLANATION\s*:|$)", c)
+            if wrapped_match:
+                c = wrapped_match.group(1).strip()
+
+            # Strip stray TYPE/CODE labels if still present.
+            c = re.sub(r"(?is)^\s*TYPE\s*:\s*[^\n]*\n", "", c).strip()
+            c = re.sub(r"(?is)^\s*CODE\s*:\s*", "", c).strip()
             
             if not c:
                 print(f"🔴 No code extracted from response: {raw_response[:100]}", flush=True)
