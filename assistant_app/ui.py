@@ -1856,17 +1856,35 @@ NOW GENERATE THE {output_language} {item_type}:"""
 
         if st.button("Run Demo"):
             demo_requests = [
-                {"item_type": "measure", "description": "Create total sales measure"},
+                {
+                    "item_type": "measure",
+                    "output_language": "DAX",
+                    "usage_target": "Semantic Model",
+                    "item_name": "Demo_TotalSales_Measure",
+                    "description": "Create total sales measure",
+                    "conditions": "",
+                },
                 {
                     "item_type": "column",
+                    "output_language": "DAX",
+                    "usage_target": "Semantic Model",
+                    "item_name": "Demo_SalesBand_Column",
                     "description": "Create sales amount band column",
+                    "conditions": "",
                 },
                 {
                     "item_type": "table",
+                    "output_language": "PySpark",
+                    "usage_target": "Notebook",
+                    "item_name": "Demo_Top5Products_Table",
                     "description": "Create top 5 products table by total sales",
+                    "conditions": "",
                 },
                 {
                     "item_type": "flag",
+                    "output_language": "DAX",
+                    "usage_target": "Semantic Model",
+                    "item_name": "Demo_AIPipeline_Flag",
                     "description": "Create AI pipeline flag",
                     "conditions": "where Sales > 1000",
                 },
@@ -1875,13 +1893,60 @@ NOW GENERATE THE {output_language} {item_type}:"""
             results = []
             with st.spinner("Generating demo items..."):
                 for req in demo_requests:
-                    results.append(
-                        agent.generate_item(
-                            description=req["description"],
+                    target_map = {
+                        "Semantic Model": "semantic",
+                        "Warehouse": "warehouse",
+                        "Notebook": "notebook",
+                        "Python Script": "python",
+                    }
+                    target = target_map.get(req.get("usage_target", "Semantic Model"), "semantic")
+
+                    output_language = req.get("output_language", "DAX")
+                    if output_language == "SQL":
+                        target = "warehouse"
+                    elif output_language == "PySpark":
+                        target = "notebook"
+                    elif output_language == "Python":
+                        target = "python"
+                    elif output_language == "DAX":
+                        target = "semantic"
+
+                    user_params = {
+                        "item_type": req["item_type"],
+                        "output_language": req.get("output_language", "DAX"),
+                        "usage_target": req.get("usage_target", "Semantic Model"),
+                        "item_name": req.get("item_name", "DemoItem"),
+                        "description": req["description"],
+                        "conditions": req.get("conditions", ""),
+                    }
+
+                    intent_request = f"Create {req['item_type']} named {user_params['item_name']}. {req['description']}"
+                    if req.get("conditions", "").strip():
+                        intent_request += f" Conditions: {req['conditions']}"
+
+                    u_result = universal_assistant.run_once(intent_request, target=target, user_params=user_params)
+
+                    if u_result and u_result.get("code") and u_result.get("type") != "ERROR":
+                        final_item_name = user_params["item_name"].strip()
+                        agent.registry.register(
+                            name=final_item_name,
                             item_type=req["item_type"],
-                            conditions=req.get("conditions", ""),
-                            auto_register=True,
+                            expression=u_result.get("code", ""),
+                            description=req["description"] + f"\n({u_result.get('type', output_language)} for {req.get('usage_target', 'Semantic Model')})",
                         )
+
+                    results.append(
+                        {
+                            "name": user_params["item_name"],
+                            "item_type": req["item_type"],
+                            "generated_type": u_result.get("type", ""),
+                            "description": req["description"],
+                            "conditions": req.get("conditions", ""),
+                            "expression": u_result.get("code", ""),
+                            "explanation": u_result.get("explanation", ""),
+                            "errors": u_result.get("errors", []),
+                            "raw_response": u_result.get("raw_response", ""),
+                        }
                     )
 
             st.session_state.demo_results = results
@@ -1892,17 +1957,21 @@ NOW GENERATE THE {output_language} {item_type}:"""
             st.write("**Created Items:**")
             for idx, result in enumerate(st.session_state.demo_results, start=1):
                 requested_type = str(result.get("item_type", "item")).strip().lower()
-                detected_type = _detect_expression_type(result.get("expression", ""))
-                if detected_type and detected_type != requested_type:
+                generated_type = str(result.get("generated_type", "")).strip()
+                if generated_type and generated_type.lower() not in {"error", requested_type}:
                     st.write(
                         f"[{idx}] {result['name']} ({requested_type}) "
-                        f"- detected from expression: {detected_type}"
+                        f"- generated engine type: {generated_type}"
                     )
                 else:
                     st.write(f"[{idx}] {result['name']} ({requested_type})")
                 with st.expander(f"View Expression: {result['name']}", expanded=False):
                     st.code(result["expression"], language="sql")
                     st.write(result.get("explanation", ""))
+                    if result.get("errors"):
+                        st.write("Validation Issues:")
+                        for err in result.get("errors", []):
+                            st.write(f"- {err}")
 
 
 def main() -> None:
