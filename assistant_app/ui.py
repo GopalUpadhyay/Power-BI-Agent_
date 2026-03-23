@@ -1063,7 +1063,15 @@ def run_ui() -> None:
                                 st.success("✅ Agent trained on your PBIX model! You can now generate code for this model.")
                                 st.rerun()
                             else:
-                                st.error("❌ Could not extract any tables from the PBIX file. File may be empty or corrupted.")
+                                file_info = PBIXExtractor.get_file_info(str(pbix_path))
+                                st.error(
+                                    "❌ Could not extract tables from this PBIX/PBIT model. "
+                                    f"Detected type: {file_info.get('model_type', 'unknown')}."
+                                )
+                                st.info(
+                                    "This can happen when the file stores a binary DataModel format not directly parseable "
+                                    "in this environment. Try exporting schema as JSON/CSV from Power BI and upload it in Step 2."
+                                )
                     
                     except Exception as e:
                         st.error(f"❌ Error extracting PBIX: {str(e)}")
