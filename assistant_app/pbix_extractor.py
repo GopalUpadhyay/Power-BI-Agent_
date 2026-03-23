@@ -66,6 +66,22 @@ class PBIXExtractor:
         return None
 
     @staticmethod
+    def _infer_type_from_column_name(column_name: str) -> str:
+        """Infer a practical type from semantic column names when explicit types are unavailable."""
+        name = PBIXExtractor._clean_name(column_name).lower()
+        if any(k in name for k in ["date", "time", "timestamp"]):
+            return "date"
+        if any(k in name for k in ["year", "month", "day", "quarter", "week"]):
+            return "bigint"
+        if any(k in name for k in ["amount", "price", "cost", "sales", "revenue", "total", "rate", "percent", "qty", "quantity"]):
+            return "double"
+        if any(k in name for k in ["is_", "has_", "flag", "active", "enabled"]):
+            return "boolean"
+        if any(k in name for k in ["id", "key"]):
+            return "bigint"
+        return "string"
+
+    @staticmethod
     def _extract_from_report_layout(zip_ref: zipfile.ZipFile) -> Optional[Dict[str, Any]]:
         """Best-effort fallback for binary PBIX: infer schema from Report/Layout query refs.
 
@@ -107,7 +123,7 @@ class PBIXExtractor:
                     continue
 
                 entry = tables.setdefault(table, {"columns": {}, "column_count": 0})
-                entry["columns"][column] = "string"
+                entry["columns"][column] = PBIXExtractor._infer_type_from_column_name(column)
 
             for info in tables.values():
                 info["column_count"] = len(info["columns"])
@@ -213,7 +229,7 @@ class PBIXExtractor:
             if not cleaned_cols:
                 continue
             tables[table_name] = {
-                "columns": {c: "string" for c in cleaned_cols},
+                "columns": {c: PBIXExtractor._infer_type_from_column_name(c) for c in cleaned_cols},
                 "column_count": len(cleaned_cols),
             }
 

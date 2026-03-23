@@ -1,8 +1,14 @@
 import json
 import re
+import csv
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, List, Optional
+
+try:
+    import pandas as pd
+except Exception:  # pragma: no cover
+    pd = None
 
 
 class ModelStore:
@@ -166,15 +172,13 @@ class ModelStore:
             except Exception:
                 notes.append(f"Could not parse JSON metadata file: {file_path.name}")
         elif suffix in {".csv", ".tsv"}:
-            text = file_path.read_text(encoding="utf-8", errors="ignore")
-            first_line = text.splitlines()[0] if text.splitlines() else ""
             delimiter = "\t" if suffix == ".tsv" else ","
-            columns = [c.strip() for c in first_line.split(delimiter) if c.strip()]
-            if columns:
+            inferred_columns = self._infer_columns_from_delimited(file_path, delimiter)
+            if inferred_columns:
                 table_name = file_path.stem
                 metadata.setdefault("tables", {})[table_name] = {
-                    "columns": {col: "string" for col in columns},
-                    "column_count": len(columns),
+                    "columns": inferred_columns,
+                    "column_count": len(inferred_columns),
                 }
                 notes.append(f"Learned table schema from CSV/TSV: {file_path.name}")
         elif suffix in {".txt", ".md"}:
@@ -182,7 +186,7 @@ class ModelStore:
             matches = re.findall(r"([A-Za-z_][A-Za-z0-9_]*)\[([A-Za-z_][A-Za-z0-9_]*)\]", text)
             for table_name, col_name in matches:
                 metadata.setdefault("tables", {}).setdefault(table_name, {"columns": {}, "column_count": 0})
-                metadata["tables"][table_name]["columns"][col_name] = "string"
+                metadata["tables"][table_name]["columns"][col_name] = self._infer_type_from_values(col_name, [])
                 metadata["tables"][table_name]["column_count"] = len(metadata["tables"][table_name]["columns"])
             notes.append(f"Learned references from text file: {file_path.name}")
         elif suffix in {".pbix", ".pbit"}:
@@ -217,6 +221,118 @@ class ModelStore:
         
         # Auto-detect relationships based on column names
         self._detect_relationships(model_id)
+
+    def _infer_columns_from_delimited(self, file_path: Path, delimiter: str) -> Dict[str, str]:
+        """Infer column types from CSV/TSV content with safe fallbacks."""
+        if pd is not None:
+            try:
+                df = pd.read_csv(file_path, sep=delimiter, nrows=500, encoding_errors="ignore")
+                inferred: Dict[str, str] = {}
+                for col in df.columns:
+                    inferred[col] = self._infer_series_type(col, df[col])
+                if inferred:
+                    return inferred
+            except Exception:
+                pass
+
+        # Lightweight fallback without pandas.
+        try:
+            with file_path.open("r", encoding="utf-8", errors="ignore", newline="") as f:
+                reader = csv.reader(f, delimiter=delimiter)
+                headers = next(reader, [])
+                headers = [h.strip() for h in headers if h.strip()]
+                if not headers:
+                    return {}
+
+                samples: Dict[str, List[str]] = {h: [] for h in headers}
+                for idx, row in enumerate(reader):
+                    for i, h in enumerate(headers):
+                        samples[h].append(row[i].strip() if i < len(row) else "")
+                    if idx >= 300:
+                        break
+
+                inferred = {}
+                for h in headers:
+                    inferred[h] = self._infer_type_from_values(h, samples.get(h, []))
+                return inferred
+        except Exception:
+            return {}
+
+    @staticmethod
+    def _infer_series_type(column_name: str, series) -> str:
+        """Map pandas series dtype + values to semantic model-friendly types."""
+        name_lower = str(column_name).lower()
+
+        # Name hints for common time keys in business models.
+        if any(k in name_lower for k in ["year", "month", "day", "quarter", "week"]):
+            return "bigint"
+
+        dtype = str(series.dtype).lower()
+        if "bool" in dtype:
+            return "boolean"
+        if "int" in dtype:
+            return "bigint"
+        if "float" in dtype or "double" in dtype:
+            return "double"
+        if "datetime" in dtype or "date" in dtype:
+            return "date"
+
+        # For object/string, try value-based inference.
+        non_null = [str(v).strip() for v in series.dropna().head(300).tolist() if str(v).strip()]
+        return ModelStore._infer_type_from_values(column_name, non_null)
+
+    @staticmethod
+    def _infer_type_from_values(column_name: str, values: List[str]) -> str:
+        """Infer type from sample string values."""
+        name_lower = str(column_name).lower()
+        if any(k in name_lower for k in ["year", "month", "day", "quarter", "week"]):
+            return "bigint"
+        if any(k in name_lower for k in ["date", "timestamp", "time"]):
+            return "date"
+        if any(k in name_lower for k in ["amount", "price", "cost", "sales", "revenue", "total", "rate", "percent", "qty", "quantity"]):
+            # Keep financial-like fields numeric by default.
+            return "double"
+
+        cleaned = [v for v in values if v is not None and str(v).strip() != ""]
+        if not cleaned:
+            return "string"
+
+        bool_hits = 0
+        int_hits = 0
+        float_hits = 0
+        date_hits = 0
+
+        for v in cleaned:
+            s = str(v).strip()
+            low = s.lower()
+            if low in {"true", "false", "yes", "no", "y", "n", "0", "1"}:
+                bool_hits += 1
+                continue
+
+            if re.fullmatch(r"[-+]?\d+", s):
+                int_hits += 1
+                continue
+
+            if re.fullmatch(r"[-+]?\d*\.\d+", s):
+                float_hits += 1
+                continue
+
+            if re.fullmatch(r"\d{4}[-/]\d{1,2}[-/]\d{1,2}", s) or re.fullmatch(r"\d{1,2}[-/]\d{1,2}[-/]\d{2,4}", s):
+                date_hits += 1
+
+        total = len(cleaned)
+        if total == 0:
+            return "string"
+
+        if bool_hits / total >= 0.9:
+            return "boolean"
+        if int_hits / total >= 0.9:
+            return "bigint"
+        if (int_hits + float_hits) / total >= 0.9:
+            return "double"
+        if date_hits / total >= 0.8:
+            return "date"
+        return "string"
 
     def _merge_metadata(self, base: Dict[str, Any], incoming: Dict[str, Any]) -> Dict[str, Any]:
         result = dict(base)
