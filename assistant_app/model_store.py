@@ -185,8 +185,29 @@ class ModelStore:
                 metadata["tables"][table_name]["columns"][col_name] = "string"
                 metadata["tables"][table_name]["column_count"] = len(metadata["tables"][table_name]["columns"])
             notes.append(f"Learned references from text file: {file_path.name}")
-        elif suffix in {".pbix"}:
-            notes.append(f"PBIX uploaded: {file_path.name} (stored locally; direct parsing not implemented yet)")
+        elif suffix in {".pbix", ".pbit"}:
+            try:
+                from .pbix_extractor import PBIXExtractor
+
+                extracted = PBIXExtractor.extract_metadata(str(file_path))
+                if extracted and extracted.get("tables"):
+                    merged = self._merge_metadata(metadata, extracted)
+                    extracted_notes = extracted.get("ingestion_notes", []) if isinstance(extracted.get("ingestion_notes", []), list) else []
+                    merged_notes = merged.setdefault("ingestion_notes", [])
+                    merged_notes.append(f"Learned metadata from {suffix.upper()} file: {file_path.name}")
+                    for note in extracted_notes:
+                        if note not in merged_notes:
+                            merged_notes.append(note)
+                    self.save_metadata(model_id, merged)
+                    # Continue to auto-relationship detection below.
+                    metadata = merged
+                else:
+                    notes.append(
+                        f"{suffix.upper()} uploaded but no parseable tables found: {file_path.name} "
+                        "(binary model may limit extraction)"
+                    )
+            except Exception:
+                notes.append(f"Could not parse {suffix.upper()} metadata file: {file_path.name}")
         elif suffix in {".png", ".jpg", ".jpeg", ".webp"}:
             notes.append(f"Screenshot uploaded: {file_path.name} (stored locally; OCR parsing not implemented yet)")
         else:

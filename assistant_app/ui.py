@@ -946,56 +946,38 @@ def run_ui() -> None:
             if st.button("🔍 Extract & Train from PBIX Model", key="extract_pbix"):
                 with st.spinner("Extracting metadata from PBIX file..."):
                     try:
-                        # Save uploaded file temporarily
+                        # Save uploaded file temporarily for validation/info.
                         pbix_path = Path(f"/tmp/{pbix_file.name}")
                         pbix_path.write_bytes(pbix_file.getvalue())
-                        
-                        # Import and use PBIX extractor
+
                         from .pbix_extractor import PBIXExtractor
-                        
-                        # Validate file
+
                         is_valid, validation_msg = PBIXExtractor.validate_pbix_file(str(pbix_path))
                         if not is_valid:
                             st.error(f"❌ Invalid PBIX file: {validation_msg}")
                         else:
-                            # Extract metadata
-                            metadata = PBIXExtractor.extract_metadata(str(pbix_path))
-                            
-                            if metadata and metadata.get("tables"):
-                                # Save extracted metadata to model
-                                extracted_metadata = model_store.load_metadata(active_model["id"])
-                                
-                                # Merge with existing metadata
-                                extracted_metadata["tables"] = metadata.get("tables", {})
-                                extracted_metadata["relationships"] = metadata.get("relationships", [])
-                                extracted_metadata["measures"] = metadata.get("measures", {})
-                                
-                                # Add ingestion note
-                                notes = extracted_metadata.setdefault("ingestion_notes", [])
-                                notes.append(f"Trained on PBIX model: {pbix_file.name}")
-                                
-                                # Save updated metadata
-                                model_store.save_metadata(active_model["id"], extracted_metadata)
-                                
-                                # Get file info
-                                file_info = PBIXExtractor.get_file_info(str(pbix_path))
-                                
+                            # Use the same unified ingestion path as CSV uploads.
+                            model_store.add_upload(active_model["id"], pbix_file.name, pbix_file.getvalue())
+
+                            # Reload metadata after ingestion.
+                            extracted_metadata = model_store.load_metadata(active_model["id"])
+                            file_info = PBIXExtractor.get_file_info(str(pbix_path))
+
+                            if extracted_metadata and extracted_metadata.get("tables"):
                                 st.success(f"✅ Successfully extracted model from {pbix_file.name}")
                                 st.write(f"**File Info:** {file_info['model_type']} model (~{file_info['size_mb']}MB)")
-                                
-                                # Show extracted schema
+
                                 col1, col2, col3 = st.columns(3)
                                 with col1:
-                                    st.metric("📊 Tables Found", len(metadata.get("tables", {})))
+                                    st.metric("📊 Tables Found", len(extracted_metadata.get("tables", {})))
                                 with col2:
-                                    st.metric("🔗 Relationships", len(metadata.get("relationships", [])))
+                                    st.metric("🔗 Relationships", len(extracted_metadata.get("relationships", [])))
                                 with col3:
-                                    st.metric("📐 Measures", len(metadata.get("measures", {})))
-                                
-                                # Show extracted tables
+                                    st.metric("📐 Measures", len(extracted_metadata.get("measures", {})))
+
                                 with st.expander("📋 Extracted Tables & Columns", expanded=True):
                                     tables_data = []
-                                    for table_name, info in metadata.get("tables", {}).items():
+                                    for table_name, info in extracted_metadata.get("tables", {}).items():
                                         col_count = info.get("column_count", 0)
                                         columns = list(info.get("columns", {}).keys())
                                         tables_data.append({
@@ -1004,40 +986,34 @@ def run_ui() -> None:
                                             "Column Names": ", ".join(columns[:5]) + ("..." if col_count > 5 else ""),
                                         })
                                     st.dataframe(pd.DataFrame(tables_data), use_container_width=True)
-                                
-                                # Show relationships
-                                if metadata.get("relationships"):
+
+                                if extracted_metadata.get("relationships"):
                                     with st.expander("🔗 Detected Relationships", expanded=True):
                                         rel_data = []
-                                        for rel in metadata.get("relationships", []):
+                                        for rel in extracted_metadata.get("relationships", []):
                                             rel_data.append({
                                                 "From": f"{rel.get('from_table')}.{rel.get('from_column')}",
                                                 "To": f"{rel.get('to_table')}.{rel.get('to_column')}",
                                             })
                                         st.dataframe(pd.DataFrame(rel_data), use_container_width=True)
-                                
-                                # Show measures
-                                if metadata.get("measures"):
+
+                                if extracted_metadata.get("measures"):
                                     with st.expander("📐 Extracted Measures", expanded=False):
-                                        for measure_name, measure_info in list(metadata.get("measures", {}).items())[:10]:
+                                        for measure_name, measure_info in list(extracted_metadata.get("measures", {}).items())[:10]:
                                             st.write(f"**{measure_name}** (in {measure_info.get('table', 'Unknown')})")
                                             st.code(measure_info.get("expression", ""), language="sql")
-                                
-                                # ===== NEW: COMPREHENSIVE MODEL CONTEXT FOR GROQ =====
+
                                 st.divider()
                                 st.subheader("🧠 Model Context for Code Generation")
                                 st.write("This is the **complete model context** that Groq will use to generate code. Groq will see all tables, columns, relationships, and measures:")
-                                
-                                # Build and display comprehensive context
+
                                 from .fabric_universal import ContextBuilder
                                 context_builder = ContextBuilder(extracted_metadata)
                                 comprehensive_context = context_builder.build_context()
-                                
-                                # Display in a code block so user can verify
+
                                 with st.expander("📋 Full Model Context (Sent to Groq)", expanded=False):
                                     st.code(comprehensive_context, language="text")
-                                
-                                # Display summary stats
+
                                 summary = context_builder.get_model_summary()
                                 col1, col2, col3, col4 = st.columns(4)
                                 with col1:
@@ -1048,29 +1024,31 @@ def run_ui() -> None:
                                     st.metric("📐 Measures", summary["measure_count"])
                                 with col4:
                                     st.metric("⚙️  Calculated Columns", summary["calculated_column_count"])
-                                
+
                                 st.success("✅ Groq will now have complete access to your model structure!")
                                 st.divider()
-                                
-                                # Train the agent
+
                                 st.info("🤖 Training agent on extracted model schema...")
+                                profile = _train_active_model(model_store, active_model["id"], agent)
                                 st.session_state.agent = _build_agent_for_model(
                                     api_key=api_key_input,
                                     metadata=extracted_metadata,
                                     model_id=active_model["id"],
                                 )
                                 st.session_state.agent_model_id = active_model["id"]
-                                st.success("✅ Agent trained on your PBIX model! You can now generate code for this model.")
+                                st.success(
+                                    "✅ Agent trained on your PBIX model! "
+                                    f"(preferred table: {profile.get('preferred_table', 'n/a')})"
+                                )
                                 st.rerun()
                             else:
-                                file_info = PBIXExtractor.get_file_info(str(pbix_path))
                                 st.error(
                                     "❌ Could not extract tables from this PBIX/PBIT model. "
                                     f"Detected type: {file_info.get('model_type', 'unknown')}."
                                 )
                                 st.info(
-                                    "This can happen when the file stores a binary DataModel format not directly parseable "
-                                    "in this environment. Try exporting schema as JSON/CSV from Power BI and upload it in Step 2."
+                                    "Try uploading this PBIX/PBIT in Step 2 along with any companion CSV/JSON schema files, "
+                                    "or export model schema and upload it directly."
                                 )
                     
                     except Exception as e:

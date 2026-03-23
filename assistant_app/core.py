@@ -224,7 +224,7 @@ class SemanticModelMetadata:
 
         # FIXED: Do NOT add sample tables - if model is empty, stay empty
         # This prevents hallucinated code generation for empty models
-        # Users will see error message: "Model is empty, please upload CSV files"
+        # Users will see error message: "Model is empty, please upload CSV/PBIX files"
         
         return normalized
     
@@ -236,10 +236,10 @@ class SemanticModelMetadata:
         """Validate model is ready for code generation. Returns (is_valid, message)."""
         if self.is_empty():
             return False, (
-                "❌ Your model is empty! Please upload CSV files first.\n\n"
+                "❌ Your model is empty! Please upload CSV/PBIX files first.\n\n"
                 "Steps:\n"
                 "1. Go to Model Hub tab\n"
-                "2. Upload CSV files (orders.csv, customers.csv, etc)\n"
+                "2. Upload CSV/PBIX files (orders.csv, customers.csv, model.pbix, etc)\n"
                 "3. Click 'Store Uploaded Files'\n"
                 "4. Return to Generate tab\n"
                 "5. Generate code from your actual model data"
@@ -941,7 +941,7 @@ class PowerBIAssistantAgent:
                 "validation_errors": [validation_msg],
                 "is_duplicate": False,
                 "similar_candidates": [],
-                "tips": ["Upload CSV files to your model first"],
+                "tips": ["Upload CSV/PBIX files to your model first"],
                 "generated_at": datetime.now().isoformat(),
             }
         
