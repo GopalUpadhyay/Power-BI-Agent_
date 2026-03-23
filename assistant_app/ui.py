@@ -1184,22 +1184,65 @@ def run_ui() -> None:
                     if selected_upload:
                         file_path = selected_upload.get("stored_path")
                         if file_path and Path(file_path).exists():
-                            # Read CSV and display
-                            preview_df = pd.read_csv(file_path)
-                            st.write(f"**Rows:** {len(preview_df)} | **Columns:** {len(preview_df.columns)}")
-                            st.dataframe(preview_df, use_container_width=True)
-                            
-                            # Show column info
-                            with st.expander("📋 Column Information"):
-                                col_info = []
-                                for col in preview_df.columns:
-                                    col_info.append({
-                                        "Column": col,
-                                        "Type": str(preview_df[col].dtype),
-                                        "Non-Null Count": preview_df[col].count(),
-                                        "Null Count": preview_df[col].isna().sum()
-                                    })
-                                st.dataframe(pd.DataFrame(col_info), use_container_width=True)
+                            suffix = Path(file_path).suffix.lower()
+
+                            if suffix in {".csv", ".tsv"}:
+                                sep = "\t" if suffix == ".tsv" else ","
+                                preview_df = pd.read_csv(file_path, sep=sep, encoding_errors="ignore")
+                                st.write(f"**Rows:** {len(preview_df)} | **Columns:** {len(preview_df.columns)}")
+                                st.dataframe(preview_df, use_container_width=True)
+
+                                with st.expander("📋 Column Information"):
+                                    col_info = []
+                                    for col in preview_df.columns:
+                                        col_info.append({
+                                            "Column": col,
+                                            "Type": str(preview_df[col].dtype),
+                                            "Non-Null Count": preview_df[col].count(),
+                                            "Null Count": preview_df[col].isna().sum()
+                                        })
+                                    st.dataframe(pd.DataFrame(col_info), use_container_width=True)
+                            elif suffix == ".json":
+                                raw = Path(file_path).read_text(encoding="utf-8", errors="ignore")
+                                parsed = json.loads(raw)
+                                if isinstance(parsed, dict):
+                                    st.json(parsed)
+                                elif isinstance(parsed, list):
+                                    st.write(f"JSON array length: {len(parsed)}")
+                                    st.json(parsed[:20])
+                                else:
+                                    st.code(str(parsed), language="text")
+                            elif suffix in {".pbix", ".pbit"}:
+                                from .pbix_extractor import PBIXExtractor
+
+                                info = PBIXExtractor.get_file_info(file_path)
+                                st.write(
+                                    f"**PBIX/PBIT Info:** type={info.get('model_type', 'unknown')}, "
+                                    f"size={info.get('size_mb', 0)}MB"
+                                )
+                                active_meta = model_store.load_metadata(active_model["id"])
+                                tables = active_meta.get("tables", {}) if isinstance(active_meta, dict) else {}
+                                st.write(f"**Current model tables available:** {len(tables)}")
+                                if tables:
+                                    preview_rows = []
+                                    for tname, tinfo in list(tables.items())[:30]:
+                                        cols = list((tinfo.get("columns") or {}).keys())
+                                        preview_rows.append({
+                                            "Table": tname,
+                                            "Columns": len(cols),
+                                            "Sample Columns": ", ".join(cols[:5]) + ("..." if len(cols) > 5 else ""),
+                                        })
+                                    st.dataframe(pd.DataFrame(preview_rows), use_container_width=True)
+                                else:
+                                    st.info("No table metadata extracted yet for this model.")
+                            elif suffix in {".txt", ".md"}:
+                                text = Path(file_path).read_text(encoding="utf-8", errors="ignore")
+                                st.code(text[:5000], language="text")
+                            else:
+                                st.info(
+                                    f"Preview is not supported for '{suffix or 'unknown'}' file type. "
+                                    "Upload stored successfully."
+                                )
                         else:
                             st.warning(f"File not found: {file_path}")
                 except Exception as e:
